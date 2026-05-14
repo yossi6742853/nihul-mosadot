@@ -192,6 +192,7 @@ async function renderDashboard() {
     bar.className = 'progress-bar ' + (pct > 100 ? 'bg-danger' : pct > 85 ? 'bg-warning' : 'bg-primary');
     drawTabsChart(s.tabs);
     loadRecentActivity();
+    if (typeof loadDashboardAlerts === 'function') loadDashboardAlerts();
   } catch (e) { notify('שגיאה: ' + e.message, 'error'); }
 }
 
