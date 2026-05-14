@@ -7,7 +7,7 @@
  * Each org spreadsheet: פעילות, ספקים, בעלות, חשבוניות, קבלות, config, audit.
  */
 
-const MASTER_SHEET_ID = '12XSl0Biu96fu4LDN99KdzCOScAe-4hWnAiIX_oaq06I';
+const MASTER_SHEET_ID = '16HB5R1uyIrxPaphX1-R2tZXKVXKVnCpFhzTAnypznPw';
 const AGENT_TOKEN     = 'NIHUL_2026_xK7tQp9eMz';   // shared secret with frontend
 const APP_VERSION     = 'v1.0.0';
 

@@ -116,12 +116,14 @@ async function doLogin() {
   btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> מתחבר…';
   try {
     const r = await api('authenticate', [u, p]);
+    // Server wraps in {ok, data}; the handler also returns {ok, user|error}
+    const auth = r.data || r;
     if (!r.ok) { errEl.textContent = r.error || 'שגיאת חיבור'; errEl.classList.remove('d-none'); return; }
-    if (r.data && r.data.ok === false) {
-      errEl.textContent = r.data.error || 'שם משתמש או סיסמה שגויים';
+    if (auth.ok === false) {
+      errEl.textContent = auth.error || 'שם משתמש או סיסמה שגויים';
       errEl.classList.remove('d-none'); return;
     }
-    State.user = r.data.user;
+    State.user = auth.user;
     setSession(State.user);
     await afterLogin();
   } catch (e) {
