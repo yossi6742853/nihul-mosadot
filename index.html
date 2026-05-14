@@ -12,15 +12,18 @@
 <body>
 
 <nav class="navbar navbar-dark mb-3">
-  <div class="container">
+  <div class="container-fluid px-4">
     <span class="navbar-brand d-flex align-items-center gap-2">
       <span class="brand-logo-circle">מ</span>
       <div>
         <div class="brand-text">ניהול מוסדות</div>
-        <div class="brand-subtitle small">אב בחכמה</div>
+        <div class="brand-subtitle small">אב בחכמה ע"ר</div>
       </div>
     </span>
     <div class="d-flex align-items-center gap-2">
+      <div id="org-picker" class="d-none">
+        <select id="orgSelect" class="form-select form-select-sm"></select>
+      </div>
       <button class="btn btn-sm btn-outline-light" id="theme-toggle" onclick="toggleTheme()" title="מצב תאורה"><i class="bi bi-moon-stars"></i></button>
       <span class="text-white-50 small" id="user-info">לא מחובר</span>
     </div>
@@ -29,13 +32,13 @@
 
 <div class="container">
 
-  <!-- LOGIN PAGE -->
+  <!-- LOGIN -->
   <div id="page-login">
     <div class="row justify-content-center">
       <div class="col-md-5">
         <div class="card p-4 mt-5 shadow">
           <h3 class="text-center mb-1">כניסה למערכת</h3>
-          <p class="text-center text-muted small mb-4">ניהול תקציב לעמותת אב בחכמה</p>
+          <p class="text-center text-muted small mb-4">ניהול תקציב עמותות</p>
           <div class="mb-3">
             <label class="form-label">שם משתמש</label>
             <input id="username" class="form-control" placeholder="admin" autocomplete="username">
@@ -54,25 +57,14 @@
     </div>
   </div>
 
-  <!-- HOME (DASHBOARD) -->
+  <!-- HOME -->
   <div id="page-home" class="d-none">
-    <div class="d-flex align-items-center justify-content-between mb-3" id="home-header">
-      <div>
-        <h3 class="mb-0" id="home-title">דשבורד</h3>
-        <div class="text-muted small" id="home-org-name">בית התלמוד</div>
-      </div>
-      <div id="org-picker-wrap" class="d-none">
-        <select id="orgSelect" class="form-select form-select-sm"></select>
-      </div>
-    </div>
-
-    <!-- TILES -->
-    <div class="row g-3 mt-1" id="tiles-row">
+    <div class="row g-3 mt-2">
       <div class="col-md-6 col-lg-3">
         <div class="card card-tile" onclick="goto('פעילות')">
           <i class="bi bi-clipboard-data fs-1 text-primary"></i>
           <h5 class="mt-2">פעילות</h5>
-          <p class="text-muted small mb-0">הוצאות פעילות חודשית/פרטנית</p>
+          <p class="text-muted small mb-0">הוצאות פעילות</p>
         </div>
       </div>
       <div class="col-md-6 col-lg-3">
@@ -93,7 +85,7 @@
         <div class="card card-tile" onclick="goto('חשבוניות')">
           <i class="bi bi-receipt fs-1 text-info"></i>
           <h5 class="mt-2">חשבוניות</h5>
-          <p class="text-muted small mb-0">לוג קישורים ל-Drive</p>
+          <p class="text-muted small mb-0">לוג קישורים</p>
         </div>
       </div>
       <div class="col-md-6 col-lg-3">
@@ -126,9 +118,9 @@
       </div>
     </div>
 
-    <!-- BUDGET STATS -->
+    <!-- Budget summary -->
     <div class="card p-3 mt-4 shadow-sm">
-      <h6 class="mb-3"><i class="bi bi-graph-up text-primary"></i> סיכום תקציב</h6>
+      <h6 class="mb-3"><i class="bi bi-graph-up text-primary"></i> סיכום תקציב <span id="home-org-name" class="text-muted small fw-normal"></span></h6>
       <div class="row text-center g-3">
         <div class="col-6 col-md-3">
           <div class="display-6 text-primary" id="stat-total">—</div>
@@ -159,7 +151,7 @@
       <div class="col-md-7">
         <div class="card p-3 h-100 shadow-sm">
           <h6><i class="bi bi-pie-chart text-info"></i> פילוח לפי גליון</h6>
-          <canvas id="tabs-chart" style="max-height:220px"></canvas>
+          <canvas id="tabs-chart" style="max-height:240px"></canvas>
         </div>
       </div>
       <div class="col-md-5">
@@ -171,7 +163,7 @@
     </div>
   </div>
 
-  <!-- DYNAMIC PAGES -->
+  <!-- Dynamic pages -->
   <div id="page-table" class="d-none"></div>
   <div id="page-audit" class="d-none"></div>
   <div id="page-orgs" class="d-none"></div>
@@ -179,7 +171,7 @@
 
 </div>
 
-<!-- Modal scaffolding -->
+<!-- Generic modal -->
 <div class="modal fade" id="genericModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content"></div>
@@ -189,21 +181,18 @@
 <!-- Toasts -->
 <div class="toast-container"></div>
 
-<!-- Loading overlay -->
+<!-- Loading -->
 <div id="loading-overlay" class="d-none">
   <div class="spinner-border text-primary" style="width:3rem;height:3rem"></div>
   <div id="loading-text" class="text-primary fw-bold mt-3"></div>
 </div>
 
-<!-- LIBS -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-
-<!-- APP -->
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
 <script src="js/table.js"></script>
-<script src="js/admin.js"></script>
 <script src="js/upload.js"></script>
+<script src="js/admin.js"></script>
 </body>
 </html>

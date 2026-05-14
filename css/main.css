@@ -1,4 +1,4 @@
-/* ניהול מוסדות — main stylesheet (מבוסס cheder-bht) */
+/* ניהול מוסדות — Bootstrap RTL overrides (matches cheder-bht style) */
 :root {
   --bg: #f6f8fa;
   --card-bg: #ffffff;
@@ -9,7 +9,6 @@
   --green: #1a7f37;
   --orange: #bf8700;
   --red: #cf222e;
-  --info: #0969da;
   --nav-bg: #1f2328;
 }
 [data-theme="dark"] {
@@ -35,6 +34,7 @@ body { background: var(--bg); color: var(--text); }
 }
 .brand-text { color: #fff; font-weight: 600; font-size: 18px; line-height: 1; }
 .brand-subtitle { color: rgba(255,255,255,0.6); }
+#orgSelect { min-width: 200px; }
 
 /* Cards */
 .card { background: var(--card-bg); border-color: var(--border); color: var(--text); }
@@ -48,7 +48,7 @@ body { background: var(--bg); color: var(--text); }
 .card-tile:hover {
   transform: translateY(-3px);
   border-color: var(--primary);
-  box-shadow: 0 6px 18px rgba(9, 105, 218, 0.15);
+  box-shadow: 0 6px 18px rgba(9,105,218,0.15);
 }
 .card-tile h5 { font-weight: 600; }
 
@@ -60,7 +60,6 @@ body { background: var(--bg); color: var(--text); }
   background: var(--card-bg); color: var(--text);
   border-color: var(--primary); box-shadow: 0 0 0 0.25rem rgba(9,105,218,0.15);
 }
-[data-theme="dark"] .form-control::placeholder { color: var(--muted); }
 
 /* Tables */
 .table { color: var(--text); }
@@ -77,17 +76,15 @@ body { background: var(--bg); color: var(--text); }
 .status-pill.approved  { background: #dafbe1; color: #1a7f37; border-color: #1a7f37; }
 .status-pill.paid      { background: #ddf4ff; color: #0969da; border-color: #0969da; }
 .status-pill.cancelled { background: #ffebe9; color: #cf222e; border-color: #cf222e; }
-
 [data-theme="dark"] .status-pill           { background: #21262d; color: #8b949e; border-color: #30363d; }
 [data-theme="dark"] .status-pill.pending   { background: #2d2100; color: #e3b341; border-color: #4d3800; }
 [data-theme="dark"] .status-pill.approved  { background: #033a16; color: #56d364; border-color: #0c4a1f; }
 [data-theme="dark"] .status-pill.paid      { background: #0c2d6b; color: #79c0ff; }
 [data-theme="dark"] .status-pill.cancelled { background: #2d1116; color: #f85149; }
 
-.locked-row { background: rgba(207, 34, 46, 0.04); }
+.locked-row { background: rgba(207,34,46,0.04); }
 .locked-row td:first-child::before { content: '🔒 '; }
 
-/* File link */
 .file-link { color: var(--primary); text-decoration: none; }
 .file-link::before { content: '📎 '; font-size: 0.9em; }
 .no-file { color: var(--muted); font-size: 12px; }
@@ -102,17 +99,13 @@ body { background: var(--bg); color: var(--text); }
 .recent-list .who { color: var(--primary); font-weight: 500; }
 
 /* Toasts */
-.toast-container {
-  position: fixed; bottom: 20px; left: 20px; z-index: 1080;
-  display: flex; flex-direction: column; gap: 8px;
-}
+.toast-container { position: fixed; bottom: 20px; left: 20px; z-index: 1080; display: flex; flex-direction: column; gap: 8px; }
 .toast-msg {
   background: var(--card-bg); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px;
   padding: 10px 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   display: flex; align-items: center; gap: 10px;
-  animation: slideIn 0.2s;
-  min-width: 240px;
+  animation: slideIn 0.2s; min-width: 240px;
 }
 .toast-msg.success { border-color: #1a7f37; }
 .toast-msg.error { border-color: #cf222e; }
@@ -121,7 +114,6 @@ body { background: var(--bg); color: var(--text); }
 @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes fadeOut { to { opacity: 0; } }
 
-/* Loading overlay */
 #loading-overlay {
   position: fixed; inset: 0;
   background: rgba(255,255,255,0.85);
@@ -149,25 +141,16 @@ body { background: var(--bg); color: var(--text); }
 .table-wrap { max-height: 65vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
 .table-wrap thead th { position: sticky; top: 0; background: var(--card-bg); z-index: 2; }
 
-/* Number column */
 .num { text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; }
-
-/* Action icons */
 .row-actions { white-space: nowrap; }
 .row-actions .btn { padding: 2px 7px; font-size: 12px; }
 
-/* Empty state */
-.empty-state {
-  text-align: center; color: var(--muted);
-  padding: 40px 20px;
-}
+.empty-state { text-align: center; color: var(--muted); padding: 40px 20px; }
 .empty-state i { font-size: 48px; opacity: 0.4; margin-bottom: 12px; display: block; }
 
-/* Modal */
 .modal-content { background: var(--card-bg); color: var(--text); border-color: var(--border); }
 .modal-header, .modal-footer { border-color: var(--border); }
 
-/* Search box */
 .search-box {
   display: flex; align-items: center; gap: 8px;
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
@@ -175,7 +158,6 @@ body { background: var(--bg); color: var(--text); }
 }
 .search-box input { border: 0; outline: 0; background: transparent; color: var(--text); width: 100%; font-size: 14px; }
 
-/* Mobile */
 @media (max-width: 768px) {
   .display-6 { font-size: 1.5rem; }
   .card-tile { padding: 16px 12px; }
