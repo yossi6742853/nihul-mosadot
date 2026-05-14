@@ -11,7 +11,13 @@ window.CONFIG = {
   CLIENT_ID: '',
 
   // Master Hub Spreadsheet ID — נשאר קבוע
-  MASTER_ID: '1AhlGUV9qbCMVKP5_LH-fKJj3-ijD8CrefBlh1Fdq9DY',
+  MASTER_ID: '12XSl0Biu96fu4LDN99KdzCOScAe-4hWnAiIX_oaq06I',
+
+  // קישורי quick-launch (זמין במצב פשוט בלי OAuth)
+  QUICK_LINKS: [
+    {name: 'Master Hub - ניהול מוסדות', id: '12XSl0Biu96fu4LDN99KdzCOScAe-4hWnAiIX_oaq06I'},
+    {name: 'בית התלמוד תשפו', id: '1tUs40BAedWRiCGclaoZF_ktZ7NXjEZ6NiYEv3Fm26u8'},
+  ],
 
   // ה-scopes הנדרשים. אל תשנה.
   SCOPES: [

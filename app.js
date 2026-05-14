@@ -20,23 +20,36 @@ const State = {
 function showSetupWizard() {
   const m = document.getElementById('main');
   const origin = location.origin;
+  const links = (CONFIG.QUICK_LINKS || []).map(l =>
+    `<a class="link-card" target="_blank" href="https://docs.google.com/spreadsheets/d/${l.id}/edit">
+      <span class="logo-mini">📊</span>
+      <div><b>${l.name}</b><div class="muted small">לחץ לפתיחה ב-Google Sheets</div></div>
+    </a>`).join('');
   m.innerHTML = `
   <div class="card setup-panel">
-    <h2>הקמת המערכת — צעד אחד אחרון</h2>
-    <p>כדי שהאתר יוכל לקרוא את הספרדשיטים שלך — דרושה הסכמת OAuth. זו הגדרה חד-פעמית של כ-3 דקות.</p>
-    <ol>
-      <li>היכנס ל-<a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → Credentials</a></li>
-      <li>בחר את הפרויקט שלך (או צור חדש)</li>
-      <li>לחץ <b>Create Credentials → OAuth client ID</b></li>
-      <li>בחר <b>Application type: Web application</b>, ושם: <code>ניהול מוסדות</code></li>
-      <li>תחת <b>Authorized JavaScript origins</b> הוסף:
-        <br><input class="code-input" readonly value="${origin}" onclick="this.select()"></li>
-      <li>לחץ <b>Create</b>, העתק את ה-<b>Client ID</b>, והדבק כאן:
-        <br><input class="code-input" id="cid" placeholder="123456789-xxxxx.apps.googleusercontent.com">
-        <br><button class="btn btn-primary" style="margin-top:8px" onclick="saveClientId()">שמור והפעל</button></li>
-    </ol>
-    <p class="muted small">ה-Client ID נשמר בקובץ <code>config.js</code> בריפו (push ידני אחרי). או נשמר ב-localStorage כפתרון מהיר.</p>
-    <p class="muted small">צריך גם להפעיל את ה-Sheets API ו-Drive API בפרויקט: <a target="_blank" href="https://console.cloud.google.com/apis/library/sheets.googleapis.com">Sheets</a> · <a target="_blank" href="https://console.cloud.google.com/apis/library/drive.googleapis.com">Drive</a></p>
+    <h2>👋 ברוך הבא ל"ניהול מוסדות"</h2>
+    <p>הספרדשיטים שלך מוכנים. עד שנשלים את הגדרת ה-Dashboard המלא (פעם אחת — ראה למטה), תוכל לעבוד ישירות מתוך Google Sheets:</p>
+    <div class="links-grid">${links}</div>
+
+    <details style="margin-top:24px;">
+      <summary class="muted" style="cursor:pointer">🔧 הפעלת מצב Dashboard מלא (אופציונלי)</summary>
+      <div style="padding:14px 0;">
+        <p>ל-Dashboard מלא (טבלאות מסוננות, העלאת קבצים בהדרגה, audit ויזואלי) דרוש OAuth Client ID:</p>
+        <ol>
+          <li>היכנס ל-<a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → Credentials</a></li>
+          <li>צור Project חדש (או בחר קיים)</li>
+          <li>הפעל ב-API Library: <a target="_blank" href="https://console.cloud.google.com/apis/library/sheets.googleapis.com">Sheets API</a> + <a target="_blank" href="https://console.cloud.google.com/apis/library/drive.googleapis.com">Drive API</a></li>
+          <li>Create Credentials → OAuth client ID → Application type: <b>Web application</b></li>
+          <li>תחת <b>Authorized JavaScript origins</b> הוסף:<br>
+            <input class="code-input" readonly value="${origin}" onclick="this.select()"></li>
+          <li>העתק את ה-Client ID לכאן:<br>
+            <input class="code-input" id="cid" placeholder="123456789-xxxxx.apps.googleusercontent.com">
+            <button class="btn btn-primary" style="margin-top:8px" onclick="saveClientId()">שמור והפעל</button></li>
+        </ol>
+      </div>
+    </details>
+
+    <p class="muted small" style="margin-top:24px;text-align:center;">© ניהול מוסדות · אב בחכמה</p>
   </div>`;
 }
 
