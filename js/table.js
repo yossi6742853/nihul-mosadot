@@ -30,6 +30,8 @@ async function renderTable(sheetName) {
       </div>
     </div>
 
+    <div class="filter-chips" id="filterChips"></div>
+
     <div id="filtersPanel" class="card p-3 mb-3 d-none">
       <div class="row g-2 align-items-end">
         <div class="col-md-3">
@@ -115,6 +117,23 @@ async function renderTable(sheetName) {
     document.getElementById('filtersPanel').classList.remove('d-none');
   }
 
+  // Render quick-filter chips
+  paintChips();
+
+  function paintChips() {
+    const fs = _filterState[sheetName] || {};
+    document.getElementById('filterChips').innerHTML = `
+      <span class="chip ${!fs.status?'active':''}" onclick="applyChip('${escAttr(sheetName)}','status','')"><i class="bi bi-list"></i> הכל</span>
+      <span class="chip ${fs.status==='טיוטה'?'active':''}" onclick="applyChip('${escAttr(sheetName)}','status','טיוטה')">טיוטה</span>
+      <span class="chip ${fs.status==='ממתין לאישור'?'active':''}" onclick="applyChip('${escAttr(sheetName)}','status','ממתין לאישור')">ממתין</span>
+      <span class="chip ${fs.status==='מאושר'?'active':''}" onclick="applyChip('${escAttr(sheetName)}','status','מאושר')">מאושר</span>
+      <span class="chip ${fs.status==='שולם'?'active':''}" onclick="applyChip('${escAttr(sheetName)}','status','שולם')">שולם</span>
+      <span class="chip" onclick="applyChip('${escAttr(sheetName)}','noInvoice',1)"><i class="bi bi-receipt"></i> ללא חשבונית</span>
+      <span class="chip" onclick="applyChip('${escAttr(sheetName)}','noReceipt',1)"><i class="bi bi-envelope-paper"></i> ללא קבלה</span>
+      <span class="chip" onclick="applyChip('${escAttr(sheetName)}','thisMonth',1)"><i class="bi bi-calendar-month"></i> החודש</span>
+    `;
+  }
+
   function paint() {
     const fs = _filterState[sheetName] = {
       q: document.getElementById('searchInput').value || '',
@@ -124,15 +143,38 @@ async function renderTable(sheetName) {
       dateTo: document.getElementById('fltDateTo').value || '',
       sumMin: document.getElementById('fltSumMin').value || '',
       sumMax: document.getElementById('fltSumMax').value || '',
+      noInvoice: _filterState[sheetName].noInvoice || false,
+      noReceipt: _filterState[sheetName].noReceipt || false,
+      thisMonth: _filterState[sheetName].thisMonth || false,
+      sortBy: _filterState[sheetName].sortBy || '',
+      sortDir: _filterState[sheetName].sortDir || 'asc',
     };
+    paintChips();
     const headers = data.headers || [];
     const visibleCols = headers.filter(h => h && HIDDEN_COLS.indexOf(h) < 0);
-    const rows = applyFilters(data.rows || [], fs);
+    let rows = applyFilters(data.rows || [], fs);
+    // Sort if requested
+    if (fs.sortBy) {
+      rows = rows.slice().sort((a, b) => {
+        const va = a[fs.sortBy], vb = b[fs.sortBy];
+        const na = Number(va), nb = Number(vb);
+        let cmp;
+        if (!isNaN(na) && !isNaN(nb)) cmp = na - nb;
+        else cmp = String(va||'').localeCompare(String(vb||''), 'he');
+        return fs.sortDir === 'desc' ? -cmp : cmp;
+      });
+    }
     let sumFiltered = 0;
     rows.forEach(r => { sumFiltered += Number(r['סכום']) || 0; });
 
     const tbl = document.getElementById('dataTable');
-    let thead = '<tr>' + visibleCols.map(h => `<th>${escHtml(h)}</th>`).join('') + '<th class="text-end">פעולות</th></tr>';
+    let thead = '<tr>' + visibleCols.map(h => {
+      const sortableCols = ['מספר סידורי','קטגורית מטרה','שם הספק','תאריך חשבון','סכום','סטטוס'];
+      if (sortableCols.indexOf(h) < 0) return `<th>${escHtml(h)}</th>`;
+      let cls = 'sortable';
+      if (fs.sortBy === h) cls += fs.sortDir === 'desc' ? ' sort-desc' : ' sort-asc';
+      return `<th class="${cls}" onclick="toggleSort('${escAttr(sheetName)}','${escAttr(h)}')">${escHtml(h)}</th>`;
+    }).join('') + '<th class="text-end">פעולות</th></tr>';
     tbl.querySelector('thead').innerHTML = thead;
     if (!rows.length) {
       tbl.querySelector('tbody').innerHTML = `<tr><td colspan="${visibleCols.length+1}" class="text-center text-muted py-4">אין שורות תואמות.</td></tr>`;
@@ -184,9 +226,41 @@ function applyFilters(rows, fs) {
     const s = Number(r['סכום']) || 0;
     if (fs.sumMin && s < Number(fs.sumMin)) return false;
     if (fs.sumMax && s > Number(fs.sumMax)) return false;
+    if (fs.noInvoice && r['קישור חשבונית']) return false;
+    if (fs.noReceipt && r['קישור קבלה']) return false;
+    if (fs.thisMonth) {
+      const d = r['תאריך חשבון'] ? new Date(r['תאריך חשבון']) : null;
+      if (!d || isNaN(d.getTime())) return false;
+      const now = new Date();
+      if (d.getFullYear() !== now.getFullYear() || d.getMonth() !== now.getMonth()) return false;
+    }
     return true;
   });
 }
+
+function applyChip(sheetName, key, value) {
+  _filterState[sheetName] = _filterState[sheetName] || {};
+  // Toggle for boolean chips
+  if (key === 'noInvoice' || key === 'noReceipt' || key === 'thisMonth') {
+    _filterState[sheetName][key] = !_filterState[sheetName][key];
+  } else {
+    _filterState[sheetName][key] = value;
+  }
+  renderTable(sheetName);
+}
+window.applyChip = applyChip;
+
+function toggleSort(sheetName, col) {
+  const fs = _filterState[sheetName] = _filterState[sheetName] || {};
+  if (fs.sortBy === col) {
+    fs.sortDir = fs.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    fs.sortBy = col;
+    fs.sortDir = 'asc';
+  }
+  renderTable(sheetName);
+}
+window.toggleSort = toggleSort;
 
 function clearFilters(sheetName) {
   _filterState[sheetName] = {};

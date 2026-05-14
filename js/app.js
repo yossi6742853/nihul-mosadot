@@ -82,18 +82,19 @@ const State = {
 window.State = State;
 
 // ---- routing ---------------------------------------------------------
-const PAGES = ['login','home','table','audit','orgs','users'];
+const PAGES = ['login','home','table','audit','orgs','users','reports'];
 function showPage(name) {
   PAGES.forEach(p => document.getElementById('page-' + p).classList.toggle('d-none', p !== name));
 }
 
 function goto(view) {
   State.currentView = view;
-  if (view === 'home')       { showPage('home'); renderDashboard(); }
-  else if (view === 'audit') { showPage('audit'); renderAudit(); }
-  else if (view === 'orgs')  { showPage('orgs'); renderOrgs(); }
-  else if (view === 'users') { showPage('users'); renderUsers(); }
-  else                       { showPage('table'); renderTable(view); }
+  if (view === 'home')         { showPage('home'); renderDashboard(); }
+  else if (view === 'audit')   { showPage('audit'); renderAudit(); }
+  else if (view === 'orgs')    { showPage('orgs'); renderOrgs(); }
+  else if (view === 'users')   { showPage('users'); renderUsers(); }
+  else if (view === 'reports') { showPage('reports'); renderReports(); }
+  else                         { showPage('table'); renderTable(view); }
   history.pushState({view}, '', '#' + encodeURIComponent(view));
 }
 window.goto = goto;

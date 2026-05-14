@@ -158,6 +158,42 @@ body { background: var(--bg); color: var(--text); }
 }
 .search-box input { border: 0; outline: 0; background: transparent; color: var(--text); width: 100%; font-size: 14px; }
 
+/* Quick filter chips */
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 16px;
+  background: var(--bg); border: 1px solid var(--border);
+  font-size: 12px; cursor: pointer; transition: 0.15s;
+  color: var(--text);
+}
+.chip:hover { background: rgba(9,105,218,0.08); border-color: var(--primary); }
+.chip.active { background: var(--primary); border-color: var(--primary); color: white; }
+.chip i { font-size: 13px; }
+
+/* Sortable column headers */
+.data-table th.sortable { cursor: pointer; user-select: none; }
+.data-table th.sortable:hover { background: rgba(9,105,218,0.05); }
+.data-table th.sortable::after { content: ' ⇅'; opacity: 0.3; font-size: 11px; }
+.data-table th.sort-asc::after { content: ' ↑'; opacity: 1; color: var(--primary); }
+.data-table th.sort-desc::after { content: ' ↓'; opacity: 1; color: var(--primary); }
+
+/* Print styles */
+@media print {
+  body { background: white !important; color: black !important; }
+  .navbar, #login-error, .modal, .toast-container, .row-actions, .search-box,
+  #filtersPanel, #toggleFilters, .filter-chips, .btn, #global-search-overlay,
+  .gs-modal, #loading-overlay { display: none !important; }
+  #user-info, #org-picker, #theme-toggle { display: none !important; }
+  .card { box-shadow: none !important; border: 1px solid #ccc !important; page-break-inside: avoid; }
+  .table-wrap { max-height: none !important; overflow: visible !important; border: none !important; }
+  .table { font-size: 11px !important; }
+  .container { max-width: 100% !important; }
+  canvas { max-height: 200px !important; }
+  .display-6 { font-size: 1.5rem !important; }
+  a { color: black !important; text-decoration: none !important; }
+}
+
 /* Global search overlay */
 #global-search-overlay { position: fixed; inset: 0; z-index: 1090; }
 #global-search-overlay .gs-bg { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }
