@@ -1,0 +1,5 @@
+apps_script/_state.json
+apps_script/_deploy_tmp*
+__pycache__/
+*.pyc
+.DS_Store

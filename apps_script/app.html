@@ -1,0 +1,619 @@
+<script>
+// ============================================================
+// ניהול מוסדות — SPA
+// ============================================================
+
+const State = {
+  user: null,
+  orgs: [],
+  currentOrgId: null,
+  currentView: 'dashboard',
+  cache: {},   // sheet rows cache: {`${orgId}:${sheet}`: {headers, rows}}
+};
+
+// --- API wrapper ---
+function api(req) {
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(reject)
+      .api(req);
+  });
+}
+
+// --- toast ---
+function toast(msg, kind) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + (kind || '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+// --- formatting helpers ---
+function fmtMoney(n) {
+  const v = Number(n) || 0;
+  return v.toLocaleString('he-IL', {style: 'currency', currency: 'ILS', maximumFractionDigits: 0});
+}
+function fmtDate(d) {
+  if (!d) return '';
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt.getTime())) return String(d);
+  return dt.toLocaleDateString('he-IL');
+}
+function statusClass(s) {
+  s = String(s || '').trim();
+  if (s === 'מאושר') return 'approved';
+  if (s === 'שולם') return 'paid';
+  if (s === 'ממתין לאישור') return 'pending';
+  if (s === 'בוטל') return 'cancelled';
+  return 'draft';
+}
+
+function el(html) { const d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
+function setMain(node) { const m = document.getElementById('main'); m.innerHTML = ''; m.appendChild(node); }
+function tpl(id) { return document.getElementById(id).content.cloneNode(true); }
+
+// --- modal ---
+function openModal(html) {
+  const root = document.getElementById('modal-root');
+  root.querySelector('.modal-content').innerHTML = '';
+  if (typeof html === 'string') root.querySelector('.modal-content').innerHTML = html;
+  else root.querySelector('.modal-content').appendChild(html);
+  root.classList.add('show');
+  root.querySelector('.modal-bg').onclick = closeModal;
+  return root.querySelector('.modal-content');
+}
+function closeModal() {
+  document.getElementById('modal-root').classList.remove('show');
+}
+
+// ============================================================
+// Bootstrap
+// ============================================================
+
+async function bootstrap() {
+  try {
+    const r = await api({action: 'whoami'});
+    if (!r.ok) throw new Error(r.error || 'בעיית התחברות');
+    State.user = r;
+    State.orgs = r.orgs || [];
+    renderHeader();
+    if (!State.user.email) {
+      setMain(el(`<div class="card center"><h2>נדרשת התחברות</h2><p class="muted">אנא רענן את הדף ואשר את ה-OAuth של Google.</p></div>`));
+      return;
+    }
+    if (State.user.role !== 'admin' && State.orgs.length === 0) {
+      const t = tpl('tpl-login');
+      const box = t.querySelector('.email-box');
+      box.textContent = State.user.email;
+      setMain(t.firstElementChild);
+      return;
+    }
+    State.currentOrgId = State.orgs[0] ? State.orgs[0].id : null;
+    populateOrgPicker();
+    document.getElementById('nav').classList.remove('hidden');
+    if (State.user.role === 'admin') {
+      document.querySelectorAll('.admin-only').forEach(b => b.classList.remove('hidden'));
+    }
+    bindNav();
+    showView('dashboard');
+  } catch (e) {
+    setMain(el(`<div class="card"><h3>שגיאת טעינה</h3><pre>${escapeHtml(String(e.message||e))}</pre></div>`));
+  }
+}
+
+function renderHeader() {
+  document.getElementById('userBadge').textContent =
+    (State.user.role === 'admin' ? '👑 ' : '👤 ') + (State.user.email || 'אורח');
+}
+
+function populateOrgPicker() {
+  const sel = document.getElementById('orgSelect');
+  sel.innerHTML = State.orgs.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
+  if (State.orgs.length > 1 || State.user.role === 'admin') {
+    document.getElementById('org-picker').classList.remove('hidden');
+  }
+  sel.onchange = () => { State.currentOrgId = sel.value; State.cache = {}; showView(State.currentView); };
+}
+
+function bindNav() {
+  document.querySelectorAll('#nav button').forEach(b => {
+    b.onclick = () => showView(b.dataset.view);
+  });
+}
+
+function showView(view) {
+  State.currentView = view;
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  if (view === 'dashboard') return renderDashboard();
+  if (view === 'audit')     return renderAudit();
+  if (view === 'admin')     return renderAdmin();
+  return renderTable(view);  // פעילות / ספקים / בעלות
+}
+
+// ============================================================
+// Dashboard
+// ============================================================
+
+async function renderDashboard() {
+  const t = tpl('tpl-dashboard');
+  setMain(t.firstElementChild);
+  const grid = document.querySelector('.summary-grid');
+  if (!State.currentOrgId && State.user.role === 'admin') {
+    // Admin without selected org → global view
+    grid.innerHTML = '<div class="loader">טוען סיכום כללי…</div>';
+    const r = await api({action: 'global_summary'});
+    if (!r.ok) { grid.innerHTML = `<div class="card">${escapeHtml(r.error)}</div>`; return; }
+    grid.innerHTML = '';
+    r.orgs.forEach(o => {
+      const overP = o.budget_total ? Math.round((o.used / o.budget_total) * 100) : 0;
+      grid.appendChild(el(`
+        <div class="stat-card ${o.remaining < 0 ? 'neg' : 'pos'}">
+          <div class="label">${escapeHtml(o.name)}</div>
+          <div class="value">${fmtMoney(o.remaining || 0)}</div>
+          <div class="sub">תקציב ${fmtMoney(o.budget_total||0)} · נוצל ${fmtMoney(o.used||0)} (${overP}%)</div>
+          <div class="progress ${o.remaining < 0 ? 'over' : ''}"><span style="width:${Math.min(100,overP)}%"></span></div>
+        </div>`));
+    });
+    return;
+  }
+
+  grid.innerHTML = '<div class="loader">טוען…</div>';
+  const r = await api({action: 'summary', org_id: State.currentOrgId});
+  if (!r.ok) { grid.innerHTML = `<div class="card">${escapeHtml(r.error)}</div>`; return; }
+  grid.innerHTML = '';
+  grid.appendChild(el(`
+    <div class="stat-card">
+      <div class="label">סך תקציב</div>
+      <div class="value">${fmtMoney(r.budget_total)}</div>
+      <div class="sub">${escapeHtml(r.org_name)}</div>
+    </div>`));
+  grid.appendChild(el(`
+    <div class="stat-card">
+      <div class="label">נוצל</div>
+      <div class="value">${fmtMoney(r.used)}</div>
+      <div class="sub">${r.budget_total ? Math.round(r.used/r.budget_total*100) : 0}% מהתקציב</div>
+    </div>`));
+  grid.appendChild(el(`
+    <div class="stat-card ${r.remaining<0?'neg':'pos'}">
+      <div class="label">יתרה</div>
+      <div class="value">${fmtMoney(r.remaining)}</div>
+      <div class="sub">${r.remaining<0 ? 'חריגה!' : 'נותר לשימוש'}</div>
+    </div>`));
+  r.tabs.forEach(t => {
+    grid.appendChild(el(`
+      <div class="stat-card">
+        <div class="label">${escapeHtml(t.name)}</div>
+        <div class="value">${fmtMoney(t.sum)}</div>
+        <div class="sub">${t.count} שורות</div>
+      </div>`));
+  });
+
+  // recent actions
+  const ra = document.querySelector('.recent-actions');
+  ra.innerHTML = '<div class="loader">טוען…</div>';
+  const aud = await api({action: 'audit', org_id: State.currentOrgId, limit: 10});
+  if (aud.ok && aud.rows && aud.rows.length) {
+    ra.innerHTML = '';
+    aud.rows.forEach(row => {
+      ra.appendChild(el(`
+        <div class="row">
+          <span class="ts">${fmtDate(row[0])}</span>
+          <span class="who">${escapeHtml(String(row[1]||''))}</span>
+          <span>${escapeHtml(String(row[2]||''))} · ${escapeHtml(String(row[3]||''))} #${escapeHtml(String(row[4]||''))}</span>
+        </div>`));
+    });
+  } else {
+    ra.innerHTML = '<div class="muted">אין פעולות אחרונות.</div>';
+  }
+}
+
+// ============================================================
+// Table view (פעילות / ספקים / בעלות)
+// ============================================================
+
+async function renderTable(sheetName) {
+  const t = tpl('tpl-table');
+  const root = t.firstElementChild;
+  setMain(root);
+  root.querySelector('.page-title').textContent = sheetName;
+  const search = root.querySelector('.search-box');
+  const tbl = root.querySelector('.data-table');
+  root.querySelector('.add-row').onclick = () => openRowEditor(sheetName, null);
+
+  tbl.innerHTML = '<tbody><tr><td>טוען…</td></tr></tbody>';
+  const cacheKey = `${State.currentOrgId}:${sheetName}`;
+  if (!State.cache[cacheKey]) {
+    const r = await api({action: 'get_sheet', org_id: State.currentOrgId, sheet: sheetName});
+    if (!r.ok) { tbl.innerHTML = `<tbody><tr><td>${escapeHtml(r.error)}</td></tr></tbody>`; return; }
+    State.cache[cacheKey] = r;
+  }
+  const data = State.cache[cacheKey];
+  function renderRows(filterStr) {
+    const headers = data.headers;
+    const rows = data.rows.filter(r => {
+      if (!filterStr) return true;
+      return Object.values(r).join(' ').toLowerCase().indexOf(filterStr.toLowerCase()) >= 0;
+    });
+    const visibleCols = headers.filter(h => h && h !== 'נוצר ע"י' && h !== 'נוצר בתאריך');
+    let html = '<thead><tr>';
+    visibleCols.forEach(h => html += `<th>${escapeHtml(h)}</th>`);
+    html += '<th></th></tr></thead><tbody>';
+    rows.forEach(r => {
+      const locked = isRowLocked(headers, r);
+      html += `<tr data-row="${r._row}" class="${locked ? 'locked' : ''}">`;
+      visibleCols.forEach(h => {
+        let v = r[h];
+        if (h === 'סכום') v = `<span class="num">${fmtMoney(v)}</span>`;
+        else if (h === 'תאריך חשבון' || h === 'נוצר בתאריך') v = fmtDate(v);
+        else if (h === 'סטטוס') v = `<span class="status ${statusClass(v)}">${escapeHtml(v||'טיוטה')}</span>`;
+        else if (h === 'קישור חשבונית' || h === 'קישור קבלה') {
+          v = v ? `<a class="file-link" target="_blank" href="${escapeAttr(v)}">פתח</a>` : '<span class="no-file">—</span>';
+        } else v = escapeHtml(String(v||''));
+        html += `<td>${v}</td>`;
+      });
+      html += `<td class="row-actions">
+          <button class="btn-link" data-act="edit">ערוך</button>
+          <button class="btn-link" data-act="upload-inv">חשבונית</button>
+          <button class="btn-link" data-act="upload-rec">קבלה</button>
+        </td></tr>`;
+    });
+    html += '</tbody>';
+    tbl.innerHTML = html;
+    tbl.querySelectorAll('tr[data-row]').forEach(tr => {
+      tr.querySelectorAll('button[data-act]').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const rowNum = Number(tr.dataset.row);
+          const rowObj = data.rows.find(x => x._row === rowNum);
+          if (btn.dataset.act === 'edit') openRowEditor(sheetName, rowObj);
+          if (btn.dataset.act === 'upload-inv') openUploadDialog(sheetName, rowObj, 'invoice');
+          if (btn.dataset.act === 'upload-rec') openUploadDialog(sheetName, rowObj, 'receipt');
+        };
+      });
+    });
+  }
+  renderRows('');
+  let timer;
+  search.oninput = () => { clearTimeout(timer); timer = setTimeout(() => renderRows(search.value), 200); };
+}
+
+function isRowLocked(headers, r) {
+  const v = r['נעול'];
+  if (v === true || String(v).toLowerCase() === 'true') return true;
+  const s = String(r['סטטוס']||'').trim();
+  return s === 'מאושר' || s === 'שולם';
+}
+
+// ============================================================
+// Row editor
+// ============================================================
+
+function openRowEditor(sheetName, rowObj) {
+  const isNew = !rowObj;
+  const cacheKey = `${State.currentOrgId}:${sheetName}`;
+  const headers = (State.cache[cacheKey] || {}).headers || [];
+  const editable = headers.filter(h => !['מספר סידורי', 'נוצר ע"י', 'נוצר בתאריך', 'נעול', 'מאשר', 'קישור חשבונית', 'קישור קבלה'].includes(h));
+  const isAdmin = State.user.role === 'admin';
+  const locked = !isNew && isRowLocked(headers, rowObj);
+
+  const form = el(`<form class="row-editor"></form>`);
+  form.innerHTML = `<h3>${isNew ? 'שורה חדשה' : 'עריכת שורה #' + (rowObj['מספר סידורי']||rowObj._row)}</h3>`;
+
+  if (locked && !isAdmin) {
+    form.innerHTML += `<div class="card" style="background:var(--warn-bg); border-color:var(--orange);">
+      🔒 שורה זו נעולה (סטטוס: ${escapeHtml(rowObj['סטטוס']||'')}). רק מנהל כללי יכול לערוך.
+    </div>`;
+  }
+
+  // Build form
+  const grid = document.createElement('div');
+  editable.forEach(h => {
+    const v = rowObj ? (rowObj[h] || '') : '';
+    let input = '';
+    if (h === 'סטטוס') {
+      input = `<select name="${h}">${
+        ['טיוטה','ממתין לאישור','מאושר','שולם','בוטל']
+          .map(s => `<option ${s===String(v)?'selected':''} value="${s}">${s}</option>`).join('')
+      }</select>`;
+    } else if (h === 'תאריך חשבון') {
+      const d = v ? new Date(v) : null;
+      const dStr = d && !isNaN(d.getTime()) ? d.toISOString().slice(0,10) : '';
+      input = `<input type="date" name="${h}" value="${dStr}">`;
+    } else if (h === 'סכום') {
+      input = `<input type="number" step="0.01" name="${h}" value="${escapeAttr(v)}">`;
+    } else {
+      input = `<input type="text" name="${h}" value="${escapeAttr(v)}">`;
+    }
+    grid.appendChild(el(`<div class="form-row"><label>${escapeHtml(h)}</label>${input}</div>`));
+  });
+  form.appendChild(grid);
+
+  // Lock controls (admin only)
+  if (!isNew && isAdmin) {
+    const lockBtn = el(`<button type="button" class="btn ${locked ? 'btn-warn' : ''}">${locked?'🔓 בטל נעילה':'🔒 נעל שורה'}</button>`);
+    lockBtn.onclick = async () => {
+      const r = await api({action: locked?'unlock_row':'lock_row', org_id: State.currentOrgId, sheet: sheetName, _row: rowObj._row});
+      if (r.ok) { toast(locked?'בוטלה נעילה':'ננעלה', 'ok'); closeModal(); reloadSheet(sheetName); }
+      else toast(r.error || 'שגיאה', 'error');
+    };
+    form.appendChild(el('<div class="form-row" style="text-align:left"></div>')).appendChild(lockBtn);
+  }
+
+  // Actions
+  const actions = el('<div class="modal-actions"></div>');
+  const saveBtn = el('<button type="submit" class="btn btn-primary">שמור</button>');
+  if (locked && !isAdmin) saveBtn.disabled = true;
+  actions.appendChild(saveBtn);
+  if (!isNew && (!locked || isAdmin)) {
+    const delBtn = el('<button type="button" class="btn btn-danger">מחק</button>');
+    delBtn.onclick = async () => {
+      if (!confirm('למחוק את השורה?')) return;
+      const r = await api({action:'delete_row', org_id: State.currentOrgId, sheet: sheetName, _row: rowObj._row});
+      if (r.ok) { toast('נמחק', 'ok'); closeModal(); reloadSheet(sheetName); }
+      else toast(r.error||'שגיאה', 'error');
+    };
+    actions.appendChild(delBtn);
+  }
+  const cancelBtn = el('<button type="button" class="btn">ביטול</button>');
+  cancelBtn.onclick = closeModal;
+  actions.appendChild(cancelBtn);
+  form.appendChild(actions);
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const fields = {};
+    fd.forEach((v,k) => fields[k] = v);
+    saveBtn.disabled = true; saveBtn.textContent = 'שומר…';
+    let r;
+    if (isNew) r = await api({action:'add_row', org_id: State.currentOrgId, sheet: sheetName, fields});
+    else r = await api({action:'update_row', org_id: State.currentOrgId, sheet: sheetName, _row: rowObj._row, fields});
+    if (r.ok) { toast(isNew?'נוסף':'נשמר','ok'); closeModal(); reloadSheet(sheetName); }
+    else { toast(r.error||r.reason||'שגיאה','error'); saveBtn.disabled = false; saveBtn.textContent = 'שמור'; }
+  };
+
+  openModal(form);
+}
+
+async function reloadSheet(sheetName) {
+  delete State.cache[`${State.currentOrgId}:${sheetName}`];
+  if (State.currentView === sheetName) await renderTable(sheetName);
+}
+
+// ============================================================
+// File upload dialog (drag & drop)
+// ============================================================
+
+function openUploadDialog(sheetName, rowObj, kind) {
+  const headers = (State.cache[`${State.currentOrgId}:${sheetName}`] || {}).headers || [];
+  const isAdmin = State.user.role === 'admin';
+  const locked = isRowLocked(headers, rowObj);
+  const colName = kind === 'receipt' ? 'קישור קבלה' : 'קישור חשבונית';
+  const existing = rowObj[colName];
+
+  const wrap = el(`
+    <div>
+      <h3>העלאת ${kind === 'receipt' ? 'קבלה' : 'חשבונית'}</h3>
+      <p class="muted">שורה #${escapeHtml(String(rowObj['מספר סידורי']||rowObj._row))} · ${escapeHtml(String(rowObj['פירוט המטרה']||''))}</p>
+      ${existing ? `<p>קיים קובץ: <a class="file-link" target="_blank" href="${escapeAttr(existing)}">פתח</a> · העלאה תחליף את הקיים${locked && !isAdmin ? ' (אך השורה נעולה)' : ''}.</p>` : ''}
+      ${locked && !isAdmin ? `<div class="card" style="background:var(--warn-bg);border-color:var(--orange);">🔒 השורה נעולה — לא ניתן להעלות קובץ.</div>` : `
+      <div class="dropzone" id="dz">
+        <div class="icon">📤</div>
+        <div>גרור קובץ לכאן, או <b>לחץ לבחירה</b></div>
+        <div class="muted" style="font-size:11px;margin-top:6px;">PDF, JPG, PNG · עד 10MB</div>
+        <input type="file" accept=".pdf,image/*">
+      </div>
+      <div id="preview"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="upBtn" disabled>העלה</button>
+        <button class="btn" id="cancel">ביטול</button>
+      </div>`}
+    </div>
+  `);
+  openModal(wrap);
+  const dz = wrap.querySelector('#dz');
+  if (!dz) return;
+  const inp = dz.querySelector('input[type=file]');
+  const prev = wrap.querySelector('#preview');
+  const upBtn = wrap.querySelector('#upBtn');
+  let chosen = null;
+  function pickFile(f) {
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { toast('הקובץ גדול מ-10MB','error'); return; }
+    chosen = f;
+    prev.innerHTML = `<div class="file-preview"><span class="name">${escapeHtml(f.name)}</span><span class="size">${(f.size/1024).toFixed(0)} KB</span></div>`;
+    upBtn.disabled = false;
+  }
+  dz.onclick = () => inp.click();
+  inp.onchange = () => pickFile(inp.files[0]);
+  dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('over'); };
+  dz.ondragleave = () => dz.classList.remove('over');
+  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove('over'); pickFile(e.dataTransfer.files[0]); };
+  wrap.querySelector('#cancel').onclick = closeModal;
+  upBtn.onclick = async () => {
+    if (!chosen) return;
+    upBtn.disabled = true; upBtn.textContent = 'מעלה…';
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const b64 = String(reader.result).split(',')[1];
+      const r = await api({
+        action: existing ? 'replace_file' : 'upload_file',
+        org_id: State.currentOrgId,
+        sheet: sheetName,
+        _row: rowObj._row,
+        kind: kind,
+        filename: chosen.name,
+        mime: chosen.type || 'application/pdf',
+        dataB64: b64
+      });
+      if (r.ok) { toast(r.replaced?'הוחלף':'הועלה', 'ok'); closeModal(); reloadSheet(sheetName); }
+      else { toast(r.error||r.reason||'שגיאה','error'); upBtn.disabled=false; upBtn.textContent='העלה'; }
+    };
+    reader.readAsDataURL(chosen);
+  };
+}
+
+// ============================================================
+// Audit
+// ============================================================
+
+async function renderAudit() {
+  const t = tpl('tpl-audit');
+  setMain(t.firstElementChild);
+  const tbl = document.querySelector('.audit-table');
+  tbl.innerHTML = '<tbody><tr><td>טוען…</td></tr></tbody>';
+  const r = await api({action:'audit', org_id: State.currentOrgId, limit: 200});
+  if (!r.ok) { tbl.innerHTML = `<tbody><tr><td>${escapeHtml(r.error)}</td></tr></tbody>`; return; }
+  let html = '<thead><tr>';
+  (r.headers||[]).forEach(h => html += `<th>${escapeHtml(String(h))}</th>`);
+  html += '</tr></thead><tbody>';
+  (r.rows||[]).forEach(row => {
+    html += '<tr>';
+    row.forEach((c,i) => {
+      let v = (i === 0) ? new Date(c).toLocaleString('he-IL') : escapeHtml(String(c||''));
+      html += `<td>${v}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  tbl.innerHTML = html;
+}
+
+// ============================================================
+// Admin
+// ============================================================
+
+async function renderAdmin() {
+  const t = tpl('tpl-admin');
+  setMain(t.firstElementChild);
+  document.querySelector('.new-org').onclick = openCreateOrg;
+  document.querySelector('.new-user').onclick = openAddUser;
+
+  // Orgs list
+  const ol = document.querySelector('.orgs-list');
+  ol.innerHTML = '<div class="loader">טוען…</div>';
+  const orgs = await api({action:'list_orgs'});
+  if (orgs.ok) {
+    ol.innerHTML = '';
+    orgs.orgs.forEach(o => {
+      const d = el(`<div class="card" style="margin-top:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div><b>${escapeHtml(o.name)}</b> <span class="muted">· ${escapeHtml(o.id)}</span><br>
+            <small class="muted">${escapeHtml(o.manager_email||'')} · תקציב ${fmtMoney(o.budget_total||0)}</small></div>
+          <div>
+            <a class="btn-link" target="_blank" href="https://docs.google.com/spreadsheets/d/${escapeAttr(o.sheet_id)}/edit">📊 גליון</a>
+            <button class="btn-link" data-act="del">מחק</button>
+          </div></div></div>`);
+      d.querySelector('[data-act=del]').onclick = async () => {
+        if (!confirm(`למחוק (להסתיר) את "${o.name}"?`)) return;
+        const r = await api({action:'delete_org', org_id:o.id});
+        toast(r.ok?'הוסר':'שגיאה', r.ok?'ok':'error');
+        renderAdmin();
+      };
+      ol.appendChild(d);
+    });
+  }
+
+  // Users list
+  const ul = document.querySelector('.users-list');
+  ul.innerHTML = '<div class="loader">טוען…</div>';
+  const us = await api({action:'list_users'});
+  if (us.ok) {
+    ul.innerHTML = '';
+    us.users.forEach(u => {
+      const d = el(`<div class="card" style="margin-top:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div><b>${escapeHtml(u.email)}</b> <span class="muted">${escapeHtml(u.role||'')}</span><br>
+            <small class="muted">${escapeHtml(u.name||'')} · org: ${escapeHtml(u.org_id||'(כולם)')}</small></div>
+          <button class="btn-link" data-act="del">הסר</button></div></div>`);
+      d.querySelector('[data-act=del]').onclick = async () => {
+        if (!confirm(`להסיר את ${u.email}?`)) return;
+        const r = await api({action:'remove_user', email: u.email, org_id: u.org_id});
+        toast(r.ok?'הוסר':'שגיאה', r.ok?'ok':'error');
+        renderAdmin();
+      };
+      ul.appendChild(d);
+    });
+  }
+
+  // Global summary
+  const gs = document.querySelector('.global-summary');
+  gs.innerHTML = '<div class="loader">טוען…</div>';
+  const sum = await api({action:'global_summary'});
+  if (sum.ok) {
+    let html = '<table class="data-table"><thead><tr><th>מוסד</th><th>תקציב</th><th>נוצל</th><th>יתרה</th><th>שורות</th></tr></thead><tbody>';
+    sum.orgs.forEach(o => {
+      html += `<tr><td>${escapeHtml(o.name)}</td><td class="num">${fmtMoney(o.budget_total||0)}</td><td class="num">${fmtMoney(o.used||0)}</td><td class="num" style="color:${(o.remaining||0)<0?'var(--red)':'#3fb950'}">${fmtMoney(o.remaining||0)}</td><td class="num">${o.count||0}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    gs.innerHTML = html;
+  }
+}
+
+function openCreateOrg() {
+  const f = el(`<form>
+    <h3>מוסד חדש</h3>
+    <div class="form-row"><label>שם המוסד</label><input name="name" required></div>
+    <div class="form-row"><label>אימייל מנהל המוסד</label><input name="manager_email" type="email" placeholder="manager@example.com"></div>
+    <div class="form-row"><label>תקציב כולל (₪)</label><input name="budget_total" type="number" step="1" value="0"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" type="submit">צור</button>
+      <button class="btn" type="button" id="cancel">ביטול</button>
+    </div>
+  </form>`);
+  f.querySelector('#cancel').onclick = closeModal;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const r = await api({action:'create_org', name: fd.get('name'), manager_email: fd.get('manager_email'), budget_total: Number(fd.get('budget_total')||0)});
+    if (r.ok) { toast('נוצר','ok'); closeModal(); bootstrap(); }
+    else toast(r.error||'שגיאה','error');
+  };
+  openModal(f);
+}
+
+function openAddUser() {
+  // Need org list for the dropdown
+  const opts = State.orgs.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
+  const f = el(`<form>
+    <h3>משתמש חדש</h3>
+    <div class="form-row"><label>אימייל</label><input name="email" type="email" required></div>
+    <div class="form-row"><label>שם</label><input name="name"></div>
+    <div class="form-row row2">
+      <div><label>תפקיד</label>
+        <select name="role">
+          <option value="manager">מנהל מוסד</option>
+          <option value="admin">מנהל כללי</option>
+        </select></div>
+      <div><label>מוסד (ריק = כל המוסדות / אדמין)</label>
+        <select name="org_id"><option value="">—</option>${opts}</select></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" type="submit">הוסף</button>
+      <button class="btn" type="button" id="cancel">ביטול</button>
+    </div>
+  </form>`);
+  f.querySelector('#cancel').onclick = closeModal;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const r = await api({action:'add_user', email: fd.get('email'), name: fd.get('name'), role: fd.get('role'), org_id: fd.get('org_id')});
+    if (r.ok) { toast('נוסף','ok'); closeModal(); renderAdmin(); }
+    else toast(r.error||'שגיאה','error');
+  };
+  openModal(f);
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+bootstrap();
+</script>

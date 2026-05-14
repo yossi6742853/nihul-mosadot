@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ניהול מוסדות</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header id="hdr">
+    <div class="brand">
+      <span class="logo">מ</span>
+      <div>
+        <div class="title">ניהול מוסדות</div>
+        <div class="subtitle">תקציב · חשבוניות · אישורים</div>
+      </div>
+    </div>
+    <div id="org-picker" class="hidden">
+      <label>מוסד:</label>
+      <select id="orgSelect"></select>
+    </div>
+    <div class="user-area">
+      <span id="userBadge"></span>
+      <button id="logoutBtn" class="btn hidden">יציאה</button>
+    </div>
+  </header>
+
+  <nav id="nav" class="hidden">
+    <button data-view="dashboard" class="active">📊 דשבורד</button>
+    <button data-view="פעילות">📋 פעילות</button>
+    <button data-view="ספקים">🏷️ ספקים</button>
+    <button data-view="בעלות">🏢 בעלות</button>
+    <button data-view="audit">🕒 היסטוריה</button>
+    <button data-view="admin" class="admin-only hidden">⚙️ ניהול כללי</button>
+  </nav>
+
+  <main id="main">
+    <div id="loader" class="loader">טוען…</div>
+  </main>
+</div>
+
+<!-- Templates -->
+<template id="tpl-login">
+  <div class="card center login-card">
+    <h2>ברוכים הבאים</h2>
+    <p class="muted">התחבר עם חשבון Google כדי לגשת למערכת.</p>
+    <div id="gis-btn"></div>
+    <p class="muted small" style="margin-top:18px;">המערכת קוראת רק את הספרדשיטים ש<b>שותפו</b> אליך.</p>
+  </div>
+</template>
+
+<template id="tpl-no-access">
+  <div class="card center">
+    <h2>אין לך גישה לאף מוסד</h2>
+    <p>הזדהית כ-<b id="myEmail"></b></p>
+    <p class="muted">פנה למנהל הכללי כדי שישתף איתך את הספרדשיט של המוסד שלך.</p>
+  </div>
+</template>
+
+<template id="tpl-dashboard">
+  <h2 class="page-title">סיכום תקציב</h2>
+  <div class="summary-grid"></div>
+  <div class="card">
+    <h3>פעולות אחרונות</h3>
+    <div class="recent-actions"></div>
+  </div>
+</template>
+
+<template id="tpl-table">
+  <div class="page-head">
+    <h2 class="page-title"></h2>
+    <div class="page-actions">
+      <input type="search" class="search-box" placeholder="חיפוש מהיר…">
+      <button class="btn btn-primary add-row">+ הוסף שורה</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table"></table>
+  </div>
+</template>
+
+<template id="tpl-audit">
+  <h2 class="page-title">היסטוריית שינויים</h2>
+  <div class="card"><table class="data-table audit-table"></table></div>
+</template>
+
+<template id="tpl-admin">
+  <h2 class="page-title">ניהול כללי</h2>
+  <div class="card">
+    <div class="page-head">
+      <h3 style="margin:0;">מוסדות</h3>
+      <button class="btn btn-primary new-org">+ הוסף מוסד</button>
+    </div>
+    <div class="orgs-list"></div>
+  </div>
+  <div class="card">
+    <div class="page-head">
+      <h3 style="margin:0;">משתמשים</h3>
+      <button class="btn btn-primary new-user">+ הוסף משתמש</button>
+    </div>
+    <div class="users-list"></div>
+  </div>
+  <div class="card">
+    <h3>סיכום על כל המוסדות</h3>
+    <div class="global-summary"></div>
+  </div>
+</template>
+
+<!-- Modal -->
+<div id="modal-root" class="hidden">
+  <div class="modal-bg"></div>
+  <div class="modal"><div class="modal-content"></div></div>
+</div>
+
+<!-- Google APIs -->
+<script async defer src="https://apis.google.com/js/api.js"></script>
+<script async defer src="https://accounts.google.com/gsi/client"></script>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

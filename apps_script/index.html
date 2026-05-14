@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<title>ניהול מוסדות</title>
+<base target="_top">
+<?!= include_('styles') ?>
+</head>
+<body>
+<div id="app">
+  <header id="hdr">
+    <div class="brand">
+      <span class="logo">מ</span>
+      <div>
+        <div class="title">ניהול מוסדות</div>
+        <div class="subtitle">תקציב · חשבוניות · אישורים</div>
+      </div>
+    </div>
+    <div id="org-picker" class="hidden">
+      <label>מוסד:</label>
+      <select id="orgSelect"></select>
+    </div>
+    <div class="user-area">
+      <span id="userBadge"></span>
+      <span id="versionBadge" class="muted">v<?= app_version ?></span>
+    </div>
+  </header>
+
+  <nav id="nav" class="hidden">
+    <button data-view="dashboard" class="active">📊 דשבורד</button>
+    <button data-view="פעילות">📋 פעילות</button>
+    <button data-view="ספקים">🏷️ ספקים</button>
+    <button data-view="בעלות">🏢 בעלות</button>
+    <button data-view="audit">🕒 היסטוריה</button>
+    <button data-view="admin" class="admin-only hidden">⚙️ ניהול כללי</button>
+  </nav>
+
+  <main id="main">
+    <div id="loader" class="loader">טוען…</div>
+  </main>
+</div>
+
+<!-- Templates -->
+<template id="tpl-login">
+  <div class="card center">
+    <h2>שלום 👋</h2>
+    <p>נראה שעדיין לא משויך אליך מוסד במערכת. פנה למנהל הכללי כדי שיוסיף אותך.</p>
+    <pre class="email-box"></pre>
+  </div>
+</template>
+
+<template id="tpl-dashboard">
+  <h2 class="page-title">סיכום תקציב</h2>
+  <div class="summary-grid"></div>
+  <div class="card">
+    <h3>פעולות אחרונות</h3>
+    <div class="recent-actions"></div>
+  </div>
+</template>
+
+<template id="tpl-table">
+  <div class="page-head">
+    <h2 class="page-title"></h2>
+    <div class="page-actions">
+      <input type="search" class="search-box" placeholder="חיפוש מהיר…">
+      <button class="btn btn-primary add-row">+ הוסף שורה</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table"></table>
+  </div>
+</template>
+
+<template id="tpl-audit">
+  <h2 class="page-title">היסטוריית שינויים</h2>
+  <div class="card"><table class="data-table audit-table"></table></div>
+</template>
+
+<template id="tpl-admin">
+  <h2 class="page-title">ניהול כללי</h2>
+  <div class="card">
+    <h3>מוסדות</h3>
+    <button class="btn btn-primary new-org">+ הוסף מוסד</button>
+    <div class="orgs-list"></div>
+  </div>
+  <div class="card">
+    <h3>משתמשים</h3>
+    <button class="btn btn-primary new-user">+ הוסף משתמש</button>
+    <div class="users-list"></div>
+  </div>
+  <div class="card">
+    <h3>סיכום על כל המוסדות</h3>
+    <div class="global-summary"></div>
+  </div>
+</template>
+
+<!-- Modal scaffolding -->
+<div id="modal-root" class="hidden">
+  <div class="modal-bg"></div>
+  <div class="modal"><div class="modal-content"></div></div>
+</div>
+
+<?!= include_('app') ?>
+</body>
+</html>
