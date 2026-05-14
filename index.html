@@ -3,121 +3,207 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ניהול מוסדות</title>
-<link rel="stylesheet" href="styles.css">
+<title>ניהול מוסדות — אב בחכמה</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/main.css">
 </head>
 <body>
-<div id="app">
-  <header id="hdr">
-    <div class="brand">
-      <span class="logo">מ</span>
+
+<nav class="navbar navbar-dark mb-3">
+  <div class="container">
+    <span class="navbar-brand d-flex align-items-center gap-2">
+      <span class="brand-logo-circle">מ</span>
       <div>
-        <div class="title">ניהול מוסדות</div>
-        <div class="subtitle">תקציב · חשבוניות · אישורים</div>
+        <div class="brand-text">ניהול מוסדות</div>
+        <div class="brand-subtitle small">אב בחכמה</div>
+      </div>
+    </span>
+    <div class="d-flex align-items-center gap-2">
+      <button class="btn btn-sm btn-outline-light" id="theme-toggle" onclick="toggleTheme()" title="מצב תאורה"><i class="bi bi-moon-stars"></i></button>
+      <span class="text-white-50 small" id="user-info">לא מחובר</span>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+
+  <!-- LOGIN PAGE -->
+  <div id="page-login">
+    <div class="row justify-content-center">
+      <div class="col-md-5">
+        <div class="card p-4 mt-5 shadow">
+          <h3 class="text-center mb-1">כניסה למערכת</h3>
+          <p class="text-center text-muted small mb-4">ניהול תקציב לעמותת אב בחכמה</p>
+          <div class="mb-3">
+            <label class="form-label">שם משתמש</label>
+            <input id="username" class="form-control" placeholder="admin" autocomplete="username">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">סיסמה</label>
+            <input id="password" type="password" class="form-control" autocomplete="current-password">
+          </div>
+          <button id="login-btn" class="btn btn-primary w-100">כניסה</button>
+          <div id="login-error" class="alert alert-danger mt-3 d-none small"></div>
+          <div class="text-center mt-3">
+            <small class="text-muted">בכניסה ראשונה: admin / 6742</small>
+          </div>
+        </div>
       </div>
     </div>
-    <div id="org-picker" class="hidden">
-      <label>מוסד:</label>
-      <select id="orgSelect"></select>
-    </div>
-    <div class="user-area">
-      <span id="userBadge"></span>
-      <button id="logoutBtn" class="btn hidden">יציאה</button>
-    </div>
-  </header>
+  </div>
 
-  <nav id="nav" class="hidden">
-    <button data-view="dashboard" class="active">📊 דשבורד</button>
-    <button data-view="פעילות">📋 פעילות</button>
-    <button data-view="ספקים">🏷️ ספקים</button>
-    <button data-view="בעלות">🏢 בעלות</button>
-    <button data-view="audit">🕒 היסטוריה</button>
-    <button data-view="admin" class="admin-only hidden">⚙️ ניהול כללי</button>
-  </nav>
+  <!-- HOME (DASHBOARD) -->
+  <div id="page-home" class="d-none">
+    <div class="d-flex align-items-center justify-content-between mb-3" id="home-header">
+      <div>
+        <h3 class="mb-0" id="home-title">דשבורד</h3>
+        <div class="text-muted small" id="home-org-name">בית התלמוד</div>
+      </div>
+      <div id="org-picker-wrap" class="d-none">
+        <select id="orgSelect" class="form-select form-select-sm"></select>
+      </div>
+    </div>
 
-  <main id="main">
-    <div id="loader" class="loader">טוען…</div>
-  </main>
+    <!-- TILES -->
+    <div class="row g-3 mt-1" id="tiles-row">
+      <div class="col-md-6 col-lg-3">
+        <div class="card card-tile" onclick="goto('פעילות')">
+          <i class="bi bi-clipboard-data fs-1 text-primary"></i>
+          <h5 class="mt-2">פעילות</h5>
+          <p class="text-muted small mb-0">הוצאות פעילות חודשית/פרטנית</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="card card-tile" onclick="goto('ספקים')">
+          <i class="bi bi-shop fs-1 text-success"></i>
+          <h5 class="mt-2">ספקים</h5>
+          <p class="text-muted small mb-0">תשלומים לספקים</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="card card-tile" onclick="goto('בעלות')">
+          <i class="bi bi-building fs-1 text-warning"></i>
+          <h5 class="mt-2">בעלות</h5>
+          <p class="text-muted small mb-0">הוצאות בעלות</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="card card-tile" onclick="goto('חשבוניות')">
+          <i class="bi bi-receipt fs-1 text-info"></i>
+          <h5 class="mt-2">חשבוניות</h5>
+          <p class="text-muted small mb-0">לוג קישורים ל-Drive</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="card card-tile" onclick="goto('קבלות')">
+          <i class="bi bi-envelope-paper fs-1 text-secondary"></i>
+          <h5 class="mt-2">קבלות</h5>
+          <p class="text-muted small mb-0">קבלות מספקים</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="card card-tile" onclick="goto('audit')">
+          <i class="bi bi-clock-history fs-1 text-danger"></i>
+          <h5 class="mt-2">היסטוריה</h5>
+          <p class="text-muted small mb-0">audit log</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3 admin-only d-none">
+        <div class="card card-tile" onclick="goto('orgs')">
+          <i class="bi bi-diagram-3 fs-1 text-primary"></i>
+          <h5 class="mt-2">מוסדות</h5>
+          <p class="text-muted small mb-0">ניהול כל המוסדות</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3 admin-only d-none">
+        <div class="card card-tile" onclick="goto('users')">
+          <i class="bi bi-people-fill fs-1 text-success"></i>
+          <h5 class="mt-2">משתמשים</h5>
+          <p class="text-muted small mb-0">הרשאות גישה</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- BUDGET STATS -->
+    <div class="card p-3 mt-4 shadow-sm">
+      <h6 class="mb-3"><i class="bi bi-graph-up text-primary"></i> סיכום תקציב</h6>
+      <div class="row text-center g-3">
+        <div class="col-6 col-md-3">
+          <div class="display-6 text-primary" id="stat-total">—</div>
+          <div class="text-muted small">סך תקציב</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="display-6 text-info" id="stat-used">—</div>
+          <div class="text-muted small">נוצל</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="display-6" id="stat-remaining">—</div>
+          <div class="text-muted small">יתרה</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="display-6 text-secondary" id="stat-rows">—</div>
+          <div class="text-muted small">סה"כ שורות</div>
+        </div>
+      </div>
+      <div class="mt-3">
+        <div class="d-flex justify-content-between small text-muted mb-1">
+          <span>ניצול</span><span id="stat-pct">—</span>
+        </div>
+        <div class="progress" style="height:10px"><div class="progress-bar" id="stat-bar" style="width:0"></div></div>
+      </div>
+    </div>
+
+    <div class="row g-3 mt-3">
+      <div class="col-md-7">
+        <div class="card p-3 h-100 shadow-sm">
+          <h6><i class="bi bi-pie-chart text-info"></i> פילוח לפי גליון</h6>
+          <canvas id="tabs-chart" style="max-height:220px"></canvas>
+        </div>
+      </div>
+      <div class="col-md-5">
+        <div class="card p-3 h-100 shadow-sm">
+          <h6><i class="bi bi-clock-history text-warning"></i> פעולות אחרונות</h6>
+          <div id="recent-activity" class="recent-list small"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DYNAMIC PAGES -->
+  <div id="page-table" class="d-none"></div>
+  <div id="page-audit" class="d-none"></div>
+  <div id="page-orgs" class="d-none"></div>
+  <div id="page-users" class="d-none"></div>
+
 </div>
 
-<!-- Templates -->
-<template id="tpl-login">
-  <div class="card center login-card">
-    <h2>ברוכים הבאים</h2>
-    <p class="muted">התחבר עם חשבון Google כדי לגשת למערכת.</p>
-    <div id="gis-btn"></div>
-    <p class="muted small" style="margin-top:18px;">המערכת קוראת רק את הספרדשיטים ש<b>שותפו</b> אליך.</p>
+<!-- Modal scaffolding -->
+<div class="modal fade" id="genericModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content"></div>
   </div>
-</template>
-
-<template id="tpl-no-access">
-  <div class="card center">
-    <h2>אין לך גישה לאף מוסד</h2>
-    <p>הזדהית כ-<b id="myEmail"></b></p>
-    <p class="muted">פנה למנהל הכללי כדי שישתף איתך את הספרדשיט של המוסד שלך.</p>
-  </div>
-</template>
-
-<template id="tpl-dashboard">
-  <h2 class="page-title">סיכום תקציב</h2>
-  <div class="summary-grid"></div>
-  <div class="card">
-    <h3>פעולות אחרונות</h3>
-    <div class="recent-actions"></div>
-  </div>
-</template>
-
-<template id="tpl-table">
-  <div class="page-head">
-    <h2 class="page-title"></h2>
-    <div class="page-actions">
-      <input type="search" class="search-box" placeholder="חיפוש מהיר…">
-      <button class="btn btn-primary add-row">+ הוסף שורה</button>
-    </div>
-  </div>
-  <div class="table-wrap">
-    <table class="data-table"></table>
-  </div>
-</template>
-
-<template id="tpl-audit">
-  <h2 class="page-title">היסטוריית שינויים</h2>
-  <div class="card"><table class="data-table audit-table"></table></div>
-</template>
-
-<template id="tpl-admin">
-  <h2 class="page-title">ניהול כללי</h2>
-  <div class="card">
-    <div class="page-head">
-      <h3 style="margin:0;">מוסדות</h3>
-      <button class="btn btn-primary new-org">+ הוסף מוסד</button>
-    </div>
-    <div class="orgs-list"></div>
-  </div>
-  <div class="card">
-    <div class="page-head">
-      <h3 style="margin:0;">משתמשים</h3>
-      <button class="btn btn-primary new-user">+ הוסף משתמש</button>
-    </div>
-    <div class="users-list"></div>
-  </div>
-  <div class="card">
-    <h3>סיכום על כל המוסדות</h3>
-    <div class="global-summary"></div>
-  </div>
-</template>
-
-<!-- Modal -->
-<div id="modal-root" class="hidden">
-  <div class="modal-bg"></div>
-  <div class="modal"><div class="modal-content"></div></div>
 </div>
 
-<!-- Google APIs -->
-<script async defer src="https://apis.google.com/js/api.js"></script>
-<script async defer src="https://accounts.google.com/gsi/client"></script>
+<!-- Toasts -->
+<div class="toast-container"></div>
 
-<script src="config.js"></script>
-<script src="app.js"></script>
+<!-- Loading overlay -->
+<div id="loading-overlay" class="d-none">
+  <div class="spinner-border text-primary" style="width:3rem;height:3rem"></div>
+  <div id="loading-text" class="text-primary fw-bold mt-3"></div>
+</div>
+
+<!-- LIBS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<!-- APP -->
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script src="js/table.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/upload.js"></script>
 </body>
 </html>

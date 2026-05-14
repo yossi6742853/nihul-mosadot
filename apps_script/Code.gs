@@ -1,94 +1,40 @@
 /**
- * ניהול מוסדות — Apps Script Backend
- * Web App multi-tenant לניהול תקציב עמותות.
+ * ניהול מוסדות — Backend (Apps Script Web App)
+ * Architecture: Token-based auth (no Google sign-in needed in browser).
+ * Frontend (GitHub Pages) calls this Web App via fetch() with AGENT_TOKEN.
  *
- * Master Hub: מאחסן רשימת מוסדות, משתמשים, audit כללי.
- * לכל מוסד — ספרדשיט נפרד עם 7 גליונות (פעילות / ספקים / בעלות / חשבוניות / קבלות / config / audit).
- *
- * אימות: Session.getActiveUser().getEmail() (Web App רץ כ-User Accessing).
- * הרשאות: admin רואה הכל; manager רק את ה-orgs שמשויכים לאימייל שלו.
+ * Master Sheet stores: orgs, users, audit, settings.
+ * Each org spreadsheet: פעילות, ספקים, בעלות, חשבוניות, קבלות, config, audit.
  */
 
-const MASTER_SHEET_ID = '1AhlGUV9qbCMVKP5_LH-fKJj3-ijD8CrefBlh1Fdq9DY';
-const APP_VERSION = 'v0.1.0';
+const MASTER_SHEET_ID = '12XSl0Biu96fu4LDN99KdzCOScAe-4hWnAiIX_oaq06I';
+const AGENT_TOKEN     = 'NIHUL_2026_xK7tQp9eMz';   // shared secret with frontend
+const APP_VERSION     = 'v1.0.0';
 
-// Bootstrap admins — used until users tab is populated, and as a permanent fallback
-// so that the master sheet's owner is never locked out.
-const FALLBACK_ADMIN_EMAILS = ['6742853@gmail.com'];
+// Locked statuses — only admin can edit / delete / replace files
+const LOCKED_STATUSES = ['מאושר', 'שולם'];
+const ORG_TABS = ['פעילות', 'ספקים', 'בעלות'];
+const ORG_HEADERS = [
+  'מספר סידורי','קטגורית מטרה','פירוט המטרה',
+  'שם הספק','טלפון ספק','תאריך חשבון',
+  'בנק','סניף','חשבון','שם המוטב','סכום',
+  'קישור חשבונית','קישור קבלה','כן (גפן)','לא (גפן)',
+  'סטטוס','מאשר','נעול','נוצר ע"י','נוצר בתאריך'
+];
 
 // =====================================================================
 // HTTP entry points
 // =====================================================================
 
 function doGet(e) {
-  // API mode: ?api=1 returns JSON (whoami).
-  if (e && e.parameter && e.parameter.api) {
-    return jsonOut({ok: true, app: 'nihul-mosadot', version: APP_VERSION, user: getUser_()});
-  }
-  // Otherwise: serve the SPA.
-  const tmpl = HtmlService.createTemplateFromFile('index');
-  tmpl.app_version = APP_VERSION;
-  return tmpl.evaluate()
-    .setTitle('ניהול מוסדות')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
-function include_(name) { return HtmlService.createHtmlOutputFromFile(name).getContent(); }
-
-// Server-side endpoints invoked from the SPA via google.script.run.
-function api(req) {
-  try {
-    return dispatch_(req && req.action || '', req || {});
-  } catch (err) {
-    return {ok: false, error: String(err && err.message || err)};
-  }
+  const action = (e && e.parameter && e.parameter.action) || 'ping';
+  return jsonOut(runAction({action, token: e.parameter.token, params: e.parameter.params ? JSON.parse(e.parameter.params) : []}));
 }
 
 function doPost(e) {
   let body = {};
-  try { body = JSON.parse(e.postData.contents || '{}'); } catch(_) {}
-  const action = body.action || '';
-  try {
-    return jsonOut(dispatch_(action, body));
-  } catch (err) {
-    return jsonOut({ok: false, error: String(err && err.message || err), action});
-  }
-}
-
-function dispatch_(action, body) {
-  const user = getUser_();
-  if (!user.email && action !== 'ping') {
-    return {ok: false, error: 'NOT_LOGGED_IN'};
-  }
-  switch (action) {
-    case 'ping':         return {ok: true, version: APP_VERSION};
-    case 'whoami':       return whoami_(user);
-    case 'list_orgs':    return {ok: true, orgs: visibleOrgs_(user)};
-    case 'create_org':   return requireAdmin_(user, () => createOrg_(user, body));
-    case 'update_org':   return requireAdmin_(user, () => updateOrg_(body));
-    case 'delete_org':   return requireAdmin_(user, () => deleteOrg_(body));
-    case 'list_users':   return requireAdmin_(user, () => ({ok: true, users: listUsers_()}));
-    case 'add_user':     return requireAdmin_(user, () => addUser_(user, body));
-    case 'remove_user':  return requireAdmin_(user, () => removeUser_(user, body));
-    case 'get_sheet':    return getSheet_(user, body);
-    case 'add_row':      return addRow_(user, body);
-    case 'update_row':   return updateRow_(user, body);
-    case 'delete_row':   return deleteRow_(user, body);
-    case 'summary':      return summary_(user, body);
-    case 'global_summary': return requireAdmin_(user, () => globalSummary_());
-    case 'audit':        return getAudit_(user, body);
-    case 'search':       return searchOrg_(user, body);
-    case 'init_master':  return requireAdmin_(user, () => initMaster_());
-    case 'bulk_import':  return requireAdmin_(user, () => bulkImport_(body));
-    case 'upload_file':  return uploadFile_(user, body);
-    case 'replace_file': return uploadFile_(user, body);  // same logic, audited as replace
-    case 'lock_row':     return setLock_(user, body, true);
-    case 'unlock_row':   return setLock_(user, body, false);
-    case 'set_status':   return setStatus_(user, body);
-    default:
-      return {ok: false, error: 'UNKNOWN_ACTION', action};
-  }
+  try { body = JSON.parse(e.postData.contents || '{}'); } catch (_) {}
+  return jsonOut(runAction(body));
 }
 
 function jsonOut(obj) {
@@ -96,84 +42,96 @@ function jsonOut(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// =====================================================================
-// Auth & user resolution
-// =====================================================================
-
-function getUser_() {
-  const email = (Session.getActiveUser().getEmail() || '').toLowerCase().trim();
-  const u = {email: email, role: 'guest', name: ''};
-  if (!email) return u;
-  // Fallback admin (hardcoded) so that the master-owner is always recognized,
-  // even before the users tab exists.
-  if (FALLBACK_ADMIN_EMAILS.indexOf(email) >= 0) u.role = 'admin';
-  // Lazy bootstrap: when an admin connects, ensure master is initialized.
-  if (u.role === 'admin') ensureMasterReady_();
-  const row = lookupUser_(email);
-  if (row) { u.role = row.role; u.name = row.name || ''; u.org_id = row.org_id || ''; }
-  return u;
-}
-
-function ensureMasterReady_() {
+function runAction(body) {
+  const token = body.token || '';
+  const action = body.action || 'ping';
+  const params = body.params || [];
+  if (action === 'ping') return {ok: true, version: APP_VERSION};
+  if (token !== AGENT_TOKEN) return {ok: false, error: 'INVALID_TOKEN'};
   try {
-    const ss = master_();
-    if (!ss.getSheetByName('orgs')) initMaster_();
-  } catch (e) {}
-}
-
-function whoami_(user) {
-  return {ok: true, ...user, orgs: visibleOrgs_(user)};
-}
-
-function requireAdmin_(user, fn) {
-  if (user.role !== 'admin') return {ok: false, error: 'FORBIDDEN_ADMIN_ONLY'};
-  return fn();
-}
-
-function lookupUser_(email) {
-  const sh = master_().getSheetByName('users');
-  if (!sh) return null;
-  const data = sh.getDataRange().getValues();
-  if (data.length < 2) return null;
-  const head = data[0].map(h => String(h).trim());
-  const idx = (k) => head.indexOf(k);
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    if (String(row[idx('email')]).toLowerCase().trim() === email) {
-      return {
-        email: email,
-        role: String(row[idx('role')] || 'manager').toLowerCase(),
-        name: row[idx('name')] || '',
-        org_id: row[idx('org_id')] || '',
-      };
-    }
+    const fn = HANDLERS[action];
+    if (!fn) return {ok: false, error: 'UNKNOWN_ACTION', action};
+    const data = fn.apply(null, params);
+    return {ok: true, data};
+  } catch (err) {
+    return {ok: false, error: String(err && err.message || err), stack: err && err.stack};
   }
-  return null;
 }
 
-function visibleOrgs_(user) {
-  const all = listOrgs_();
-  if (user.role === 'admin') return all;
-  // For managers: orgs where they appear as manager in users sheet
-  const myOrgIds = new Set();
-  const sh = master_().getSheetByName('users');
-  if (sh) {
-    const d = sh.getDataRange().getValues();
-    const head = d[0].map(String);
-    const eIdx = head.indexOf('email');
-    const oIdx = head.indexOf('org_id');
-    for (let i = 1; i < d.length; i++) {
-      if (String(d[i][eIdx]).toLowerCase().trim() === user.email && d[i][oIdx]) {
-        myOrgIds.add(String(d[i][oIdx]));
-      }
-    }
-  }
-  return all.filter(o => myOrgIds.has(o.id));
+// =====================================================================
+// Action handlers
+// =====================================================================
+
+const HANDLERS = {
+  // -- auth & meta --
+  authenticate: authenticate,
+  whoami: function(username) { return getUser_(username); },
+
+  // -- orgs --
+  listOrgs:    listOrgs_,
+  createOrg:   createOrg_,
+  updateOrg:   updateOrg_,
+  deleteOrg:   deleteOrg_,
+
+  // -- users --
+  listUsers:   listUsers_,
+  addUser:     addUser_,
+  removeUser:  removeUser_,
+  changePassword: changePassword_,
+
+  // -- sheet rows --
+  getSheet:    getSheet_,
+  addRow:      addRow_,
+  updateRow:   updateRow_,
+  deleteRow:   deleteRow_,
+  setStatus:   setStatus_,
+  setLock:     setLock_,
+
+  // -- summaries --
+  summary:        summary_,
+  globalSummary:  globalSummary_,
+
+  // -- audit --
+  audit:       audit_get_,
+
+  // -- file uploads --
+  uploadFile:  uploadFile_,
+
+  // -- search --
+  search:      search_,
+
+  // -- self heal --
+  initMaster:  initMaster_,
+};
+
+// =====================================================================
+// Auth (simple username/password from Master.users)
+// =====================================================================
+
+function authenticate(username, password) {
+  ensureMasterReady_();
+  const users = listUsers_();
+  const u = users.find(x => String(x['username']||'').toLowerCase() === String(username||'').toLowerCase());
+  if (!u) return {ok: false, error: 'משתמש לא נמצא'};
+  const stored = String(u['password'] || '');
+  if (stored !== String(password)) return {ok: false, error: 'סיסמה שגויה'};
+  return {ok: true, user: {
+    username: u['username'],
+    role: u['role'] || 'manager',
+    name: u['name'] || '',
+    org_id: u['org_id'] || '',
+    permissions: u['permissions'] || ''
+  }};
 }
 
-function userCanAccessOrg_(user, org_id) {
-  if (user.role === 'admin') return true;
-  return visibleOrgs_(user).some(o => o.id === String(org_id));
+function getUser_(username) {
+  const users = listUsers_();
+  return users.find(x => String(x['username']||'').toLowerCase() === String(username||'').toLowerCase()) || null;
+}
+
+function userIsAdmin_(username) {
+  const u = getUser_(username);
+  return u && String(u.role).toLowerCase() === 'admin';
 }
 
 // =====================================================================
@@ -182,177 +140,97 @@ function userCanAccessOrg_(user, org_id) {
 
 function master_() { return SpreadsheetApp.openById(MASTER_SHEET_ID); }
 
-function listOrgs_() {
-  const sh = master_().getSheetByName('orgs');
+function tableRead_(ss, tabName) {
+  const sh = ss.getSheetByName(tabName);
   if (!sh) return [];
-  const d = sh.getDataRange().getValues();
-  if (d.length < 2) return [];
-  const head = d[0].map(String);
-  const out = [];
-  for (let i = 1; i < d.length; i++) {
-    const r = d[i];
-    if (!r[0]) continue;
-    const obj = {};
-    head.forEach((k, j) => obj[k] = r[j]);
-    if (String(obj.active).toLowerCase() === 'false') continue;
-    out.push(obj);
-  }
-  return out;
+  const data = sh.getDataRange().getValues();
+  if (data.length < 2) return [];
+  const headers = data[0].map(String);
+  return data.slice(1).filter(r => r[0] !== '' && r[0] !== null).map(r => {
+    const o = {};
+    headers.forEach((h, i) => o[h] = r[i]);
+    return o;
+  });
+}
+
+function tableHeaders_(ss, tabName) {
+  const sh = ss.getSheetByName(tabName);
+  if (!sh) return [];
+  return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+}
+
+function listOrgs_() {
+  const rows = tableRead_(master_(), 'orgs');
+  return rows.filter(o => String(o.active).toUpperCase() !== 'FALSE');
 }
 
 function getOrgById_(org_id) {
   return listOrgs_().find(o => String(o.id) === String(org_id));
 }
 
-function listUsers_() {
-  const sh = master_().getSheetByName('users');
-  if (!sh) return [];
-  const d = sh.getDataRange().getValues();
-  if (d.length < 2) return [];
-  const head = d[0].map(String);
-  return d.slice(1).filter(r => r[0]).map(r => {
-    const o = {};
-    head.forEach((k, j) => o[k] = r[j]);
-    return o;
-  });
-}
+function listUsers_() { return tableRead_(master_(), 'users'); }
 
 // =====================================================================
 // Org CRUD
 // =====================================================================
 
-function createOrg_(user, body) {
-  const name = (body.name || '').trim();
-  const manager_email = (body.manager_email || '').toLowerCase().trim();
-  const budget_total = Number(body.budget_total || 0);
-  if (!name) return {ok: false, error: 'NAME_REQUIRED'};
+function createOrg_(actorUsername, name, manager_username, manager_password, budget_total) {
+  if (!userIsAdmin_(actorUsername)) throw new Error('FORBIDDEN_ADMIN_ONLY');
+  if (!name) throw new Error('NAME_REQUIRED');
   const id = 'org_' + Utilities.formatDate(new Date(), 'GMT', 'yyyyMMddHHmmss');
-  const newSs = SpreadsheetApp.create('ניהול מוסדות — ' + name);
-  const newId = newSs.getId();
-  bootstrapOrgSheet_(newSs, name, budget_total);
-  // Share with manager (if provided)
-  if (manager_email) {
-    try { DriveApp.getFileById(newId).addEditor(manager_email); } catch(e) {}
-  }
-  // Add row to master.orgs
+  const ss = SpreadsheetApp.create('ניהול מוסדות — ' + name);
+  bootstrapOrgSpreadsheet_(ss, name, Number(budget_total||0));
+  const sheetId = ss.getId();
+  // Append to master.orgs
   const orgsSh = master_().getSheetByName('orgs');
-  orgsSh.appendRow([id, name, newId, manager_email, new Date(), 'TRUE', budget_total, '']);
-  // Add manager to users
-  if (manager_email) addUser_(user, {email: manager_email, role: 'manager', org_id: id, name: ''});
-  audit_(user, 'create_org', id, {name, manager_email, sheet_id: newId});
-  return {ok: true, org: {id, name, sheet_id: newId, manager_email, budget_total}};
+  orgsSh.appendRow([id, name, sheetId, '', manager_username||'', new Date(), 'TRUE', Number(budget_total||0), '']);
+  // Add user row
+  if (manager_username) {
+    addUser_(actorUsername, manager_username, manager_password || generatePassword_(),
+             'manager', id, name + ' מנהל');
+  }
+  audit_(actorUsername, 'create_org', id, {name, sheet_id: sheetId});
+  return {id, name, sheet_id: sheetId, manager_username, budget_total};
 }
 
-function updateOrg_(body) {
+function updateOrg_(actorUsername, org_id, fields) {
+  if (!userIsAdmin_(actorUsername)) throw new Error('FORBIDDEN_ADMIN_ONLY');
   const sh = master_().getSheetByName('orgs');
-  const d = sh.getDataRange().getValues();
-  const head = d[0].map(String);
+  const data = sh.getDataRange().getValues();
+  const head = data[0].map(String);
   const idIdx = head.indexOf('id');
-  for (let i = 1; i < d.length; i++) {
-    if (String(d[i][idIdx]) === String(body.org_id)) {
-      ['name', 'manager_email', 'budget_total', 'notes', 'active'].forEach(k => {
-        if (body[k] !== undefined) {
-          const ci = head.indexOf(k);
-          if (ci >= 0) sh.getRange(i + 1, ci + 1).setValue(body[k]);
-        }
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idIdx]) === String(org_id)) {
+      Object.keys(fields||{}).forEach(k => {
+        const ci = head.indexOf(k);
+        if (ci >= 0) sh.getRange(i+1, ci+1).setValue(fields[k]);
       });
-      audit_(getUser_(), 'update_org', body.org_id, body);
+      audit_(actorUsername, 'update_org', org_id, fields);
       return {ok: true};
     }
   }
-  return {ok: false, error: 'ORG_NOT_FOUND'};
+  throw new Error('ORG_NOT_FOUND');
 }
 
-function deleteOrg_(body) {
+function deleteOrg_(actorUsername, org_id) {
+  if (!userIsAdmin_(actorUsername)) throw new Error('FORBIDDEN_ADMIN_ONLY');
   const sh = master_().getSheetByName('orgs');
-  const d = sh.getDataRange().getValues();
-  const head = d[0].map(String);
+  const data = sh.getDataRange().getValues();
+  const head = data[0].map(String);
   const idIdx = head.indexOf('id');
   const actIdx = head.indexOf('active');
-  for (let i = 1; i < d.length; i++) {
-    if (String(d[i][idIdx]) === String(body.org_id)) {
-      sh.getRange(i + 1, actIdx + 1).setValue('FALSE');
-      audit_(getUser_(), 'delete_org', body.org_id, {});
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idIdx]) === String(org_id)) {
+      sh.getRange(i+1, actIdx+1).setValue('FALSE');
+      audit_(actorUsername, 'delete_org', org_id, {});
       return {ok: true};
     }
   }
-  return {ok: false, error: 'ORG_NOT_FOUND'};
+  throw new Error('ORG_NOT_FOUND');
 }
 
-// =====================================================================
-// Users CRUD
-// =====================================================================
-
-function addUser_(actor, body) {
-  const sh = master_().getSheetByName('users');
-  const email = (body.email || '').toLowerCase().trim();
-  if (!email) return {ok: false, error: 'EMAIL_REQUIRED'};
-  // If exists for same org_id — update role/name; otherwise append.
-  const d = sh.getDataRange().getValues();
-  const head = d[0].map(String);
-  const eIdx = head.indexOf('email');
-  const oIdx = head.indexOf('org_id');
-  const rIdx = head.indexOf('role');
-  const nIdx = head.indexOf('name');
-  for (let i = 1; i < d.length; i++) {
-    if (String(d[i][eIdx]).toLowerCase().trim() === email &&
-        String(d[i][oIdx]) === String(body.org_id || '')) {
-      if (body.role) sh.getRange(i + 1, rIdx + 1).setValue(body.role);
-      if (body.name) sh.getRange(i + 1, nIdx + 1).setValue(body.name);
-      audit_(actor, 'update_user', body.org_id || '', {email, role: body.role});
-      return {ok: true, updated: true};
-    }
-  }
-  sh.appendRow([email, body.role || 'manager', body.org_id || '', body.name || '', new Date()]);
-  // If org provided — share its sheet with this user
-  if (body.org_id) {
-    const org = getOrgById_(body.org_id);
-    if (org && org.sheet_id) {
-      try { DriveApp.getFileById(org.sheet_id).addEditor(email); } catch(e) {}
-    }
-  }
-  audit_(actor, 'add_user', body.org_id || '', {email, role: body.role});
-  return {ok: true};
-}
-
-function removeUser_(actor, body) {
-  const sh = master_().getSheetByName('users');
-  const email = (body.email || '').toLowerCase().trim();
-  const d = sh.getDataRange().getValues();
-  const head = d[0].map(String);
-  const eIdx = head.indexOf('email');
-  const oIdx = head.indexOf('org_id');
-  for (let i = d.length - 1; i >= 1; i--) {
-    if (String(d[i][eIdx]).toLowerCase().trim() === email &&
-        (!body.org_id || String(d[i][oIdx]) === String(body.org_id))) {
-      sh.deleteRow(i + 1);
-    }
-  }
-  audit_(actor, 'remove_user', body.org_id || '', {email});
-  return {ok: true};
-}
-
-// =====================================================================
-// Sheet operations on org spreadsheets
-// =====================================================================
-
-const ORG_TABS = ['פעילות', 'ספקים', 'בעלות'];
-const ORG_HEADERS = [
-  'מספר סידורי', 'קטגורית מטרה', 'פירוט המטרה',
-  'שם הספק', 'טלפון ספק', 'תאריך חשבון',
-  'בנק', 'סניף', 'חשבון', 'שם המוטב',
-  'סכום',
-  'קישור חשבונית', 'קישור קבלה',
-  'סטטוס', 'מאשר', 'נעול', 'נוצר ע"י', 'נוצר בתאריך'
-];
-
-// Statuses that imply the row is locked (only admin can edit/delete).
-const LOCKED_STATUSES = ['מאושר', 'שולם'];
-
-function bootstrapOrgSheet_(ss, orgName, budgetTotal) {
-  // Remove the default Sheet1
+function bootstrapOrgSpreadsheet_(ss, orgName, budget) {
   const def = ss.getSheets()[0];
-  // Build budget tabs
   ORG_TABS.forEach((tab, idx) => {
     const sh = (idx === 0) ? def : ss.insertSheet(tab);
     if (idx === 0) sh.setName(tab);
@@ -360,236 +238,207 @@ function bootstrapOrgSheet_(ss, orgName, budgetTotal) {
     sh.setFrozenRows(1);
     sh.getRange(1, 1, 1, ORG_HEADERS.length).setFontWeight('bold').setBackground('#fff2cc');
   });
-  // Auxiliary tabs
   const inv = ss.insertSheet('חשבוניות');
-  inv.appendRow(['חותמת זמן', 'אימייל', 'מספר סידורי', 'גליון', 'קישור']);
+  inv.appendRow(['חותמת זמן','אימייל','מספר סידורי','גליון','קישור']);
   inv.setFrozenRows(1);
   const rec = ss.insertSheet('קבלות');
-  rec.appendRow(['חותמת זמן', 'אימייל', 'מספר סידורי', 'גליון', 'קישור']);
+  rec.appendRow(['חותמת זמן','אימייל','מספר סידורי','גליון','קישור']);
   rec.setFrozenRows(1);
   const cfg = ss.insertSheet('config');
-  cfg.appendRow(['key', 'value']);
+  cfg.appendRow(['key','value']);
   cfg.appendRow(['org_name', orgName]);
-  cfg.appendRow(['budget_total', budgetTotal]);
-  cfg.appendRow(['categories', 'אחר;פעילות חודשית;פעילות פרטנית;אחזקה ותחזוקה;נקיון וציוד נקיון;קייטרינג;שכירות;אישורים;ציוד משרדי']);
-  cfg.appendRow(['workflow_statuses', 'טיוטה;ממתין לאישור;מאושר;שולם;בוטל']);
+  cfg.appendRow(['budget_total', budget]);
+  cfg.appendRow(['categories','אחר;פעילות חודשית;פעילות פרטנית;אחזקה ותחזוקה;נקיון וציוד נקיון;קייטרינג;שכירות;אישורים;ציוד משרדי']);
+  cfg.appendRow(['workflow_statuses','טיוטה;ממתין לאישור;מאושר;שולם;בוטל']);
   const aud = ss.insertSheet('audit');
-  aud.appendRow(['ts', 'user_email', 'action', 'sheet', 'row_id', 'details']);
+  aud.appendRow(['ts','user','action','sheet','row_id','details']);
   aud.setFrozenRows(1);
 }
 
-function orgSpreadsheet_(user, org_id) {
-  if (!userCanAccessOrg_(user, org_id)) throw new Error('FORBIDDEN');
+// =====================================================================
+// Users CRUD
+// =====================================================================
+
+function addUser_(actorUsername, username, password, role, org_id, name) {
+  if (!userIsAdmin_(actorUsername)) throw new Error('FORBIDDEN_ADMIN_ONLY');
+  if (!username) throw new Error('USERNAME_REQUIRED');
+  const sh = master_().getSheetByName('users');
+  const data = sh.getDataRange().getValues();
+  const head = data[0].map(String);
+  // Update if exists
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][head.indexOf('username')]).toLowerCase() === String(username).toLowerCase()) {
+      if (password) sh.getRange(i+1, head.indexOf('password')+1).setValue(password);
+      if (role)     sh.getRange(i+1, head.indexOf('role')+1).setValue(role);
+      if (org_id)   sh.getRange(i+1, head.indexOf('org_id')+1).setValue(org_id);
+      if (name)     sh.getRange(i+1, head.indexOf('name')+1).setValue(name);
+      audit_(actorUsername, 'update_user', org_id||'', {username, role});
+      return {ok: true, updated: true};
+    }
+  }
+  sh.appendRow([username, password || generatePassword_(), role||'manager', org_id||'', name||'', new Date(), '']);
+  audit_(actorUsername, 'add_user', org_id||'', {username, role});
+  return {ok: true};
+}
+
+function removeUser_(actorUsername, username) {
+  if (!userIsAdmin_(actorUsername)) throw new Error('FORBIDDEN_ADMIN_ONLY');
+  const sh = master_().getSheetByName('users');
+  const data = sh.getDataRange().getValues();
+  const head = data[0].map(String);
+  const uIdx = head.indexOf('username');
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][uIdx]).toLowerCase() === String(username).toLowerCase()) {
+      sh.deleteRow(i+1);
+    }
+  }
+  audit_(actorUsername, 'remove_user', '', {username});
+  return {ok: true};
+}
+
+function changePassword_(actorUsername, username, newPassword) {
+  // user can change own password; admin can change any
+  if (actorUsername !== username && !userIsAdmin_(actorUsername)) throw new Error('FORBIDDEN');
+  const sh = master_().getSheetByName('users');
+  const data = sh.getDataRange().getValues();
+  const head = data[0].map(String);
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][head.indexOf('username')]).toLowerCase() === String(username).toLowerCase()) {
+      sh.getRange(i+1, head.indexOf('password')+1).setValue(newPassword);
+      audit_(actorUsername, 'change_password', '', {username});
+      return {ok: true};
+    }
+  }
+  throw new Error('USER_NOT_FOUND');
+}
+
+function generatePassword_() {
+  const chars = 'abcdefghkmnpqrstuvwxyz23456789';
+  let p = '';
+  for (let i = 0; i < 8; i++) p += chars.charAt(Math.floor(Math.random()*chars.length));
+  return p;
+}
+
+// =====================================================================
+// Sheet operations
+// =====================================================================
+
+function userCanAccessOrg_(username, org_id) {
+  const u = getUser_(username);
+  if (!u) return false;
+  if (String(u.role).toLowerCase() === 'admin') return true;
+  return String(u.org_id) === String(org_id);
+}
+
+function orgSpreadsheet_(username, org_id) {
+  if (!userCanAccessOrg_(username, org_id)) throw new Error('FORBIDDEN_ORG');
   const org = getOrgById_(org_id);
   if (!org) throw new Error('ORG_NOT_FOUND');
   return {org, ss: SpreadsheetApp.openById(org.sheet_id)};
 }
 
-function getSheet_(user, body) {
-  const {ss, org} = orgSpreadsheet_(user, body.org_id);
-  const tab = body.sheet || 'פעילות';
-  const sh = ss.getSheetByName(tab);
-  if (!sh) return {ok: false, error: 'SHEET_NOT_FOUND', tab};
+function getSheet_(username, org_id, sheetName) {
+  const {ss, org} = orgSpreadsheet_(username, org_id);
+  const sh = ss.getSheetByName(sheetName);
+  if (!sh) throw new Error('SHEET_NOT_FOUND: ' + sheetName);
   const data = sh.getDataRange().getValues();
-  if (!data.length) return {ok: true, headers: [], rows: []};
-  const headers = data[0].map(String);
+  const headers = (data[0]||[]).map(String);
   const rows = data.slice(1).map((r, i) => {
     const o = {_row: i + 2};
     headers.forEach((h, j) => o[h] = r[j]);
     return o;
   });
-  return {ok: true, headers, rows, org_name: org.name, sheet: tab};
+  return {headers, rows, org_name: org.name, sheet: sheetName};
 }
 
-function addRow_(user, body) {
-  const {ss, org} = orgSpreadsheet_(user, body.org_id);
-  const tab = body.sheet || 'פעילות';
-  const sh = ss.getSheetByName(tab);
-  if (!sh) return {ok: false, error: 'SHEET_NOT_FOUND'};
+function addRow_(username, org_id, sheetName, fields) {
+  const {ss} = orgSpreadsheet_(username, org_id);
+  const sh = ss.getSheetByName(sheetName);
+  if (!sh) throw new Error('SHEET_NOT_FOUND');
   const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
-  const fields = body.fields || {};
-  // Auto-fill metadata
-  if (headers.indexOf('נוצר ע"י') >= 0 && !fields['נוצר ע"י']) fields['נוצר ע"י'] = user.email;
-  if (headers.indexOf('נוצר בתאריך') >= 0 && !fields['נוצר בתאריך']) fields['נוצר בתאריך'] = new Date();
-  if (headers.indexOf('סטטוס') >= 0 && !fields['סטטוס']) fields['סטטוס'] = 'טיוטה';
-  // Auto-increment serial if missing
-  if (headers.indexOf('מספר סידורי') >= 0 && !fields['מספר סידורי']) {
-    fields['מספר סידורי'] = nextSerial_(sh);
-  }
-  const row = headers.map(h => fields[h] !== undefined ? fields[h] : '');
+  const f = fields || {};
+  if (headers.indexOf('נוצר ע"י') >= 0 && !f['נוצר ע"י']) f['נוצר ע"י'] = username;
+  if (headers.indexOf('נוצר בתאריך') >= 0 && !f['נוצר בתאריך']) f['נוצר בתאריך'] = new Date();
+  if (headers.indexOf('סטטוס') >= 0 && !f['סטטוס']) f['סטטוס'] = 'טיוטה';
+  if (headers.indexOf('מספר סידורי') >= 0 && !f['מספר סידורי']) f['מספר סידורי'] = nextSerial_(sh);
+  const row = headers.map(h => f[h] !== undefined ? f[h] : '');
   sh.appendRow(row);
-  const newRowIdx = sh.getLastRow();
-  audit_(user, 'add_row', body.org_id, {sheet: tab, row: newRowIdx, fields: fields});
-  auditOrg_(ss, user, 'add_row', tab, newRowIdx, fields);
-  return {ok: true, _row: newRowIdx, serial: fields['מספר סידורי']};
+  const newRow = sh.getLastRow();
+  audit_(username, 'add_row', org_id, {sheet: sheetName, row: newRow, fields: f});
+  auditOrg_(ss, username, 'add_row', sheetName, newRow, f);
+  return {_row: newRow, serial: f['מספר סידורי']};
 }
 
-function updateRow_(user, body) {
-  const {ss} = orgSpreadsheet_(user, body.org_id);
-  const tab = body.sheet || 'פעילות';
-  const sh = ss.getSheetByName(tab);
-  if (!sh) return {ok: false, error: 'SHEET_NOT_FOUND'};
+function updateRow_(username, org_id, sheetName, _row, fields) {
+  const {ss} = orgSpreadsheet_(username, org_id);
+  const sh = ss.getSheetByName(sheetName);
   const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
-  const rowNum = Number(body._row);
-  if (!rowNum || rowNum < 2) return {ok: false, error: 'INVALID_ROW'};
-  const fields = body.fields || {};
   const before = {};
-  headers.forEach((h, i) => before[h] = sh.getRange(rowNum, i + 1).getValue());
-  // Lock guard
-  if (rowIsLocked_(headers, before) && user.role !== 'admin' && !body.force_admin) {
-    return {ok: false, error: 'ROW_LOCKED', reason: 'נעול / סטטוס סופי — רק מנהל כללי יכול לערוך'};
+  headers.forEach((h, i) => before[h] = sh.getRange(_row, i+1).getValue());
+  if (rowIsLocked_(headers, before) && !userIsAdmin_(username)) {
+    throw new Error('שורה נעולה — רק מנהל כללי יכול לערוך');
   }
-  Object.keys(fields).forEach(k => {
+  Object.keys(fields||{}).forEach(k => {
     const ci = headers.indexOf(k);
-    if (ci >= 0) sh.getRange(rowNum, ci + 1).setValue(fields[k]);
+    if (ci >= 0) sh.getRange(_row, ci+1).setValue(fields[k]);
   });
-  audit_(user, 'update_row', body.org_id, {sheet: tab, row: rowNum, before, after: fields});
-  auditOrg_(ss, user, 'update_row', tab, rowNum, {before, after: fields});
+  audit_(username, 'update_row', org_id, {sheet: sheetName, row: _row, fields, before});
+  auditOrg_(ss, username, 'update_row', sheetName, _row, {fields, before});
   return {ok: true};
 }
 
-function deleteRow_(user, body) {
-  const {ss} = orgSpreadsheet_(user, body.org_id);
-  const tab = body.sheet || 'פעילות';
-  const sh = ss.getSheetByName(tab);
-  if (!sh) return {ok: false, error: 'SHEET_NOT_FOUND'};
-  const rowNum = Number(body._row);
-  if (!rowNum || rowNum < 2) return {ok: false, error: 'INVALID_ROW'};
+function deleteRow_(username, org_id, sheetName, _row) {
+  const {ss} = orgSpreadsheet_(username, org_id);
+  const sh = ss.getSheetByName(sheetName);
   const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
   const snapshot = {};
-  headers.forEach((h, i) => snapshot[h] = sh.getRange(rowNum, i + 1).getValue());
-  if (rowIsLocked_(headers, snapshot) && user.role !== 'admin') {
-    return {ok: false, error: 'ROW_LOCKED', reason: 'נעול — לא ניתן למחוק'};
+  headers.forEach((h, i) => snapshot[h] = sh.getRange(_row, i+1).getValue());
+  if (rowIsLocked_(headers, snapshot) && !userIsAdmin_(username)) {
+    throw new Error('שורה נעולה — אין למחוק');
   }
-  sh.deleteRow(rowNum);
-  audit_(user, 'delete_row', body.org_id, {sheet: tab, row: rowNum, snapshot});
-  auditOrg_(ss, user, 'delete_row', tab, rowNum, snapshot);
+  sh.deleteRow(_row);
+  audit_(username, 'delete_row', org_id, {sheet: sheetName, row: _row, snapshot});
+  auditOrg_(ss, username, 'delete_row', sheetName, _row, snapshot);
+  return {ok: true};
+}
+
+function setStatus_(username, org_id, sheetName, _row, newStatus) {
+  const {ss} = orgSpreadsheet_(username, org_id);
+  const sh = ss.getSheetByName(sheetName);
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const stIdx = headers.indexOf('סטטוס');
+  const apIdx = headers.indexOf('מאשר');
+  const prev = String(sh.getRange(_row, stIdx+1).getValue() || '').trim();
+  const willLock = LOCKED_STATUSES.indexOf(newStatus) >= 0;
+  const wasLocked = LOCKED_STATUSES.indexOf(prev) >= 0;
+  if ((willLock || wasLocked) && !userIsAdmin_(username)) {
+    throw new Error('שינוי סטטוס מאושר/שולם — רק למנהל כללי');
+  }
+  sh.getRange(_row, stIdx+1).setValue(newStatus);
+  if (willLock && apIdx >= 0) sh.getRange(_row, apIdx+1).setValue(username);
+  audit_(username, 'set_status', org_id, {sheet: sheetName, row: _row, prev, next: newStatus});
+  auditOrg_(ss, username, 'set_status', sheetName, _row, {prev, next: newStatus});
+  return {ok: true};
+}
+
+function setLock_(username, org_id, sheetName, _row, locked) {
+  if (!locked && !userIsAdmin_(username)) throw new Error('פתיחת נעילה — רק מנהל כללי');
+  const {ss} = orgSpreadsheet_(username, org_id);
+  const sh = ss.getSheetByName(sheetName);
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const ci = headers.indexOf('נעול');
+  if (ci < 0) throw new Error('NO_LOCK_COLUMN');
+  sh.getRange(_row, ci+1).setValue(locked ? 'TRUE' : 'FALSE');
+  audit_(username, locked?'lock_row':'unlock_row', org_id, {sheet: sheetName, row: _row});
+  auditOrg_(ss, username, locked?'lock_row':'unlock_row', sheetName, _row, {});
   return {ok: true};
 }
 
 function rowIsLocked_(headers, rowObj) {
-  const lockIdx = headers.indexOf('נעול');
-  const stIdx = headers.indexOf('סטטוס');
-  if (lockIdx >= 0) {
-    const v = rowObj['נעול'] || rowObj[headers[lockIdx]];
-    if (String(v).toLowerCase() === 'true' || v === true) return true;
-  }
-  if (stIdx >= 0) {
-    const s = String(rowObj['סטטוס'] || rowObj[headers[stIdx]] || '').trim();
-    if (LOCKED_STATUSES.indexOf(s) >= 0) return true;
-  }
-  return false;
-}
-
-function setLock_(user, body, locked) {
-  const {ss} = orgSpreadsheet_(user, body.org_id);
-  const sh = ss.getSheetByName(body.sheet || 'פעילות');
-  if (!sh) return {ok: false, error: 'SHEET_NOT_FOUND'};
-  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
-  const ci = headers.indexOf('נעול');
-  if (ci < 0) return {ok: false, error: 'NO_LOCK_COLUMN'};
-  const rowNum = Number(body._row);
-  if (!rowNum || rowNum < 2) return {ok: false, error: 'INVALID_ROW'};
-  // managers can lock but only admin can unlock
-  if (!locked && user.role !== 'admin') return {ok: false, error: 'FORBIDDEN_UNLOCK_ADMIN_ONLY'};
-  sh.getRange(rowNum, ci + 1).setValue(locked ? 'TRUE' : 'FALSE');
-  audit_(user, locked ? 'lock_row' : 'unlock_row', body.org_id, {sheet: body.sheet, row: rowNum});
-  auditOrg_(ss, user, locked ? 'lock_row' : 'unlock_row', body.sheet, rowNum, {});
-  return {ok: true};
-}
-
-function setStatus_(user, body) {
-  const {ss} = orgSpreadsheet_(user, body.org_id);
-  const sh = ss.getSheetByName(body.sheet || 'פעילות');
-  if (!sh) return {ok: false, error: 'SHEET_NOT_FOUND'};
-  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
-  const stIdx = headers.indexOf('סטטוס');
-  const apIdx = headers.indexOf('מאשר');
-  const rowNum = Number(body._row);
-  if (stIdx < 0 || !rowNum) return {ok: false, error: 'INVALID'};
-  const next = String(body.status || '').trim();
-  // Only admin can move into a "locking" status (approve/pay), or out of it
-  const willLock = LOCKED_STATUSES.indexOf(next) >= 0;
-  const prev = String(sh.getRange(rowNum, stIdx + 1).getValue() || '').trim();
-  const wasLocked = LOCKED_STATUSES.indexOf(prev) >= 0;
-  if ((willLock || wasLocked) && user.role !== 'admin') {
-    return {ok: false, error: 'FORBIDDEN_APPROVAL_ADMIN_ONLY'};
-  }
-  sh.getRange(rowNum, stIdx + 1).setValue(next);
-  if (willLock && apIdx >= 0) sh.getRange(rowNum, apIdx + 1).setValue(user.email);
-  audit_(user, 'set_status', body.org_id, {sheet: body.sheet, row: rowNum, prev, next});
-  auditOrg_(ss, user, 'set_status', body.sheet, rowNum, {prev, next});
-  return {ok: true};
-}
-
-// =====================================================================
-// File uploads (חשבוניות / קבלות)
-// =====================================================================
-
-function uploadFile_(user, body) {
-  // body: {org_id, sheet ('פעילות'|'ספקים'|'בעלות'), _row, kind ('invoice'|'receipt'),
-  //        filename, mime, dataB64}
-  const {ss, org} = orgSpreadsheet_(user, body.org_id);
-  const sh = ss.getSheetByName(body.sheet);
-  if (!sh) return {ok: false, error: 'SHEET_NOT_FOUND'};
-  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
-  const rowNum = Number(body._row);
-  if (!rowNum) return {ok: false, error: 'INVALID_ROW'};
-
-  // Lock guard for replace
-  const rowSnapshot = {};
-  headers.forEach((h, i) => rowSnapshot[h] = sh.getRange(rowNum, i + 1).getValue());
-  if (rowIsLocked_(headers, rowSnapshot) && user.role !== 'admin') {
-    return {ok: false, error: 'ROW_LOCKED', reason: 'נעול — אין החלפת קובץ'};
-  }
-
-  // Resolve target column
-  const colName = body.kind === 'receipt' ? 'קישור קבלה' : 'קישור חשבונית';
-  const colIdx = headers.indexOf(colName);
-  if (colIdx < 0) return {ok: false, error: 'NO_COLUMN', col: colName};
-
-  // Prepare folder structure: <org folder>/<kind>/
-  const folder = ensureOrgFolder_(org, body.kind === 'receipt' ? 'קבלות' : 'חשבוניות');
-
-  // Decode upload
-  const bytes = Utilities.base64Decode(body.dataB64 || '');
-  const blob = Utilities.newBlob(bytes, body.mime || 'application/pdf', body.filename || 'file.pdf');
-  const file = folder.createFile(blob);
-  // Best-effort share with viewers in same domain (link sharing is on for the spreadsheet only)
-  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
-
-  const url = file.getUrl();
-  const previousUrl = sh.getRange(rowNum, colIdx + 1).getValue();
-
-  // Update sheet cell
-  sh.getRange(rowNum, colIdx + 1).setValue(url);
-
-  // Mirror to invoices/receipts log tab
-  const logName = body.kind === 'receipt' ? 'קבלות' : 'חשבוניות';
-  const logSh = ss.getSheetByName(logName);
-  const serial = sh.getRange(rowNum, headers.indexOf('מספר סידורי') + 1).getValue();
-  if (logSh) logSh.appendRow([new Date(), user.email, serial, body.sheet, url]);
-
-  audit_(user, previousUrl ? 'replace_file' : 'upload_file', body.org_id,
-         {sheet: body.sheet, row: rowNum, kind: body.kind, file: file.getId(), prev: previousUrl, next: url, name: body.filename});
-  auditOrg_(ss, user, previousUrl ? 'replace_file' : 'upload_file', body.sheet, rowNum,
-            {kind: body.kind, file: file.getId(), prev: previousUrl, next: url, name: body.filename});
-
-  return {ok: true, url, file_id: file.getId(), name: body.filename, replaced: !!previousUrl};
-}
-
-function ensureOrgFolder_(org, sub) {
-  // Folder lives next to the org spreadsheet, in a subfolder by year + sub
-  const file = DriveApp.getFileById(org.sheet_id);
-  const parents = file.getParents();
-  const parent = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
-  const orgFolderName = 'ניהול מוסדות — קבצים — ' + org.name;
-  let orgFolder;
-  const it = parent.getFoldersByName(orgFolderName);
-  orgFolder = it.hasNext() ? it.next() : parent.createFolder(orgFolderName);
-  if (!sub) return orgFolder;
-  const it2 = orgFolder.getFoldersByName(sub);
-  return it2.hasNext() ? it2.next() : orgFolder.createFolder(sub);
+  const v = rowObj['נעול'];
+  if (v === true || String(v).toLowerCase() === 'true') return true;
+  const s = String(rowObj['סטטוס']||'').trim();
+  return LOCKED_STATUSES.indexOf(s) >= 0;
 }
 
 function nextSerial_(sh) {
@@ -600,63 +449,41 @@ function nextSerial_(sh) {
 }
 
 // =====================================================================
-// Summary & search
+// Summaries
 // =====================================================================
 
-function summary_(user, body) {
-  const {ss, org} = orgSpreadsheet_(user, body.org_id);
+function summary_(username, org_id) {
+  const {ss, org} = orgSpreadsheet_(username, org_id);
   const cfg = readConfig_(ss);
   const total = Number(cfg.budget_total || org.budget_total || 0);
   const tabs = ORG_TABS.filter(t => ss.getSheetByName(t));
-  const out = {ok: true, org_name: org.name, budget_total: total, tabs: []};
-  let usedAll = 0;
-  tabs.forEach(t => {
+  let used = 0;
+  const tabStats = tabs.map(t => {
     const sh = ss.getSheetByName(t);
     const data = sh.getDataRange().getValues();
-    if (data.length < 2) { out.tabs.push({name: t, count: 0, sum: 0}); return; }
+    if (data.length < 2) return {name: t, count: 0, sum: 0};
     const headers = data[0].map(String);
     const sumIdx = headers.indexOf('סכום');
     let sum = 0, count = 0;
     for (let i = 1; i < data.length; i++) {
-      const v = Number(data[i][sumIdx]) || 0;
-      if (data[i][0] !== '' && data[i][0] !== null) { sum += v; count++; }
+      if (data[i][0] !== '' && data[i][0] != null) {
+        sum += Number(data[i][sumIdx]) || 0;
+        count++;
+      }
     }
-    out.tabs.push({name: t, count, sum});
-    usedAll += sum;
+    used += sum;
+    return {name: t, count, sum, budget: Number(cfg['budget_'+t]||0)};
   });
-  out.used = usedAll;
-  out.remaining = total - usedAll;
-  return out;
+  return {org_name: org.name, org_id, budget_total: total, used, remaining: total - used, tabs: tabStats};
 }
 
-function globalSummary_() {
+function globalSummary_(username) {
+  if (!userIsAdmin_(username)) throw new Error('FORBIDDEN_ADMIN_ONLY');
   const orgs = listOrgs_();
-  const out = orgs.map(o => {
-    try {
-      const ss = SpreadsheetApp.openById(o.sheet_id);
-      const cfg = readConfig_(ss);
-      const total = Number(cfg.budget_total || o.budget_total || 0);
-      let used = 0, count = 0;
-      ORG_TABS.forEach(t => {
-        const sh = ss.getSheetByName(t);
-        if (!sh) return;
-        const d = sh.getDataRange().getValues();
-        if (d.length < 2) return;
-        const headers = d[0].map(String);
-        const sumIdx = headers.indexOf('סכום');
-        for (let i = 1; i < d.length; i++) {
-          if (d[i][0] !== '' && d[i][0] !== null) {
-            used += Number(d[i][sumIdx]) || 0;
-            count++;
-          }
-        }
-      });
-      return {id: o.id, name: o.name, budget_total: total, used, remaining: total - used, count};
-    } catch (e) {
-      return {id: o.id, name: o.name, error: String(e.message || e)};
-    }
+  return orgs.map(o => {
+    try { return summary_(username, o.id); }
+    catch (e) { return {org_id: o.id, org_name: o.name, error: String(e.message||e)}; }
   });
-  return {ok: true, orgs: out};
 }
 
 function readConfig_(ss) {
@@ -668,11 +495,99 @@ function readConfig_(ss) {
   return out;
 }
 
-function searchOrg_(user, body) {
-  const {ss} = orgSpreadsheet_(user, body.org_id);
-  const q = String(body.query || '').trim().toLowerCase();
-  if (!q) return {ok: true, results: []};
-  const results = [];
+// =====================================================================
+// Audit
+// =====================================================================
+
+function audit_(username, action, org_id, details) {
+  try {
+    const sh = master_().getSheetByName('audit');
+    if (!sh) return;
+    sh.appendRow([new Date(), username||'(anon)', action, org_id||'',
+                  JSON.stringify(details||{}).slice(0, 4000)]);
+  } catch (e) {}
+}
+
+function auditOrg_(ss, username, action, sheet, rowId, details) {
+  try {
+    const sh = ss.getSheetByName('audit');
+    if (!sh) return;
+    sh.appendRow([new Date(), username||'(anon)', action, sheet, rowId,
+                  JSON.stringify(details||{}).slice(0, 4000)]);
+  } catch (e) {}
+}
+
+function audit_get_(username, org_id, limit) {
+  limit = limit || 200;
+  if (org_id) {
+    const {ss} = orgSpreadsheet_(username, org_id);
+    const sh = ss.getSheetByName('audit');
+    if (!sh) return {headers: [], rows: []};
+    const d = sh.getDataRange().getValues();
+    return {headers: d[0]||[], rows: d.slice(1).reverse().slice(0, limit)};
+  }
+  if (!userIsAdmin_(username)) throw new Error('FORBIDDEN_ADMIN_ONLY');
+  const sh = master_().getSheetByName('audit');
+  const d = sh.getDataRange().getValues();
+  return {headers: d[0]||[], rows: d.slice(1).reverse().slice(0, limit)};
+}
+
+// =====================================================================
+// File upload
+// =====================================================================
+
+function uploadFile_(username, org_id, sheetName, _row, kind, filename, mime, dataB64) {
+  const {ss, org} = orgSpreadsheet_(username, org_id);
+  const sh = ss.getSheetByName(sheetName);
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const snap = {};
+  headers.forEach((h, i) => snap[h] = sh.getRange(_row, i+1).getValue());
+  if (rowIsLocked_(headers, snap) && !userIsAdmin_(username)) {
+    throw new Error('שורה נעולה — אי אפשר להחליף קובץ');
+  }
+  const colName = kind === 'receipt' ? 'קישור קבלה' : 'קישור חשבונית';
+  const colIdx = headers.indexOf(colName);
+  if (colIdx < 0) throw new Error('NO_COLUMN: ' + colName);
+  const folder = ensureOrgFolder_(org, kind === 'receipt' ? 'קבלות' : 'חשבוניות');
+  const bytes = Utilities.base64Decode(dataB64 || '');
+  const blob = Utilities.newBlob(bytes, mime || 'application/pdf', filename || 'file.pdf');
+  const file = folder.createFile(blob);
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+  const url = file.getUrl();
+  const previousUrl = sh.getRange(_row, colIdx+1).getValue();
+  sh.getRange(_row, colIdx+1).setValue(url);
+  const logName = kind === 'receipt' ? 'קבלות' : 'חשבוניות';
+  const logSh = ss.getSheetByName(logName);
+  const serial = sh.getRange(_row, headers.indexOf('מספר סידורי')+1).getValue();
+  if (logSh) logSh.appendRow([new Date(), username, serial, sheetName, url]);
+  audit_(username, previousUrl?'replace_file':'upload_file', org_id,
+         {sheet: sheetName, row: _row, kind, file_id: file.getId(), prev: previousUrl, next: url, name: filename});
+  auditOrg_(ss, username, previousUrl?'replace_file':'upload_file', sheetName, _row,
+            {kind, file_id: file.getId(), prev: previousUrl, next: url, name: filename});
+  return {url, file_id: file.getId(), name: filename, replaced: !!previousUrl};
+}
+
+function ensureOrgFolder_(org, sub) {
+  const file = DriveApp.getFileById(org.sheet_id);
+  const parents = file.getParents();
+  const parent = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const orgFolderName = 'ניהול מוסדות — קבצים — ' + org.name;
+  const it = parent.getFoldersByName(orgFolderName);
+  const orgFolder = it.hasNext() ? it.next() : parent.createFolder(orgFolderName);
+  if (!sub) return orgFolder;
+  const it2 = orgFolder.getFoldersByName(sub);
+  return it2.hasNext() ? it2.next() : orgFolder.createFolder(sub);
+}
+
+// =====================================================================
+// Search
+// =====================================================================
+
+function search_(username, org_id, query) {
+  const {ss} = orgSpreadsheet_(username, org_id);
+  const q = String(query||'').toLowerCase().trim();
+  if (!q) return [];
+  const out = [];
   ORG_TABS.forEach(tab => {
     const sh = ss.getSheetByName(tab);
     if (!sh) return;
@@ -680,56 +595,44 @@ function searchOrg_(user, body) {
     if (d.length < 2) return;
     const headers = d[0].map(String);
     for (let i = 1; i < d.length; i++) {
-      const row = d[i];
-      const joined = row.join(' ').toLowerCase();
-      if (joined.indexOf(q) >= 0) {
-        const o = {_row: i + 1, _sheet: tab};
-        headers.forEach((h, j) => o[h] = row[j]);
-        results.push(o);
-        if (results.length >= 200) break;
+      if (d[i].join(' ').toLowerCase().indexOf(q) >= 0) {
+        const o = {_row: i+1, _sheet: tab};
+        headers.forEach((h, j) => o[h] = d[i][j]);
+        out.push(o);
+        if (out.length >= 200) break;
       }
     }
   });
-  return {ok: true, results};
+  return out;
 }
 
 // =====================================================================
-// Audit
+// Init / self-heal
 // =====================================================================
 
-function audit_(user, action, org_id, details) {
-  try {
-    const sh = master_().getSheetByName('audit');
-    if (!sh) return;
-    sh.appendRow([new Date(), user.email || '(anon)', action, org_id || '', JSON.stringify(details || {}).slice(0, 4000)]);
-  } catch (e) {}
-}
-
-function auditOrg_(ss, user, action, sheet, rowId, details) {
-  try {
-    const sh = ss.getSheetByName('audit');
-    if (!sh) return;
-    sh.appendRow([new Date(), user.email || '(anon)', action, sheet, rowId, JSON.stringify(details || {}).slice(0, 4000)]);
-  } catch (e) {}
-}
-
-function getAudit_(user, body) {
-  if (body && body.org_id) {
-    const {ss} = orgSpreadsheet_(user, body.org_id);
-    const sh = ss.getSheetByName('audit');
-    if (!sh) return {ok: true, rows: []};
-    const d = sh.getDataRange().getValues();
-    return {ok: true, headers: d[0], rows: d.slice(1).reverse().slice(0, body.limit || 200)};
+function ensureMasterReady_() {
+  const ss = master_();
+  ['orgs','users','audit','settings'].forEach(n => {
+    if (!ss.getSheetByName(n)) initMaster_();
+  });
+  // Ensure users tab has expected headers
+  const sh = ss.getSheetByName('users');
+  if (sh) {
+    const head = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(String);
+    if (head.indexOf('username') < 0) {
+      // Migrate old schema (email/role/org_id/name/added_at) → new (username/password/role/org_id/name/added_at/permissions)
+      sh.clearContents();
+      sh.appendRow(['username','password','role','org_id','name','added_at','permissions']);
+      sh.appendRow(['admin','6742','admin','','יוסף שניידר',new Date(),'all']);
+    } else {
+      // Make sure default admin exists
+      const data = sh.getDataRange().getValues();
+      const uIdx = head.indexOf('username');
+      const has = data.slice(1).some(r => String(r[uIdx]).toLowerCase() === 'admin');
+      if (!has) sh.appendRow(['admin','6742','admin','','יוסף שניידר',new Date(),'all']);
+    }
   }
-  if (user.role !== 'admin') return {ok: false, error: 'FORBIDDEN_ADMIN_ONLY'};
-  const sh = master_().getSheetByName('audit');
-  const d = sh.getDataRange().getValues();
-  return {ok: true, headers: d[0], rows: d.slice(1).reverse().slice(0, body.limit || 500)};
 }
-
-// =====================================================================
-// Bootstrap & bulk import
-// =====================================================================
 
 function initMaster_() {
   const ss = master_();
@@ -739,38 +642,12 @@ function initMaster_() {
     if (sh.getLastRow() === 0) {
       sh.appendRow(headers);
       sh.setFrozenRows(1);
-      sh.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#d9ead3');
+      sh.getRange(1,1,1,headers.length).setFontWeight('bold').setBackground('#d9ead3');
     }
   };
-  ensure('orgs',     ['id', 'name', 'sheet_id', 'manager_email', 'created_at', 'active', 'budget_total', 'notes']);
-  ensure('users',    ['email', 'role', 'org_id', 'name', 'added_at']);
-  ensure('audit',    ['ts', 'user_email', 'action', 'org_id', 'details']);
-  ensure('settings', ['key', 'value']);
-  // Remove default Sheet1 if empty
-  const def = ss.getSheetByName('Sheet1') || ss.getSheetByName('גיליון1');
-  if (def && def.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(def);
-  return {ok: true, master_id: MASTER_SHEET_ID, url: ss.getUrl()};
-}
-
-function bulkImport_(body) {
-  // body: {org_id, sheet_name, rows: [ {col: val, ...}, ... ]}
-  const org = getOrgById_(body.org_id);
-  if (!org) return {ok: false, error: 'ORG_NOT_FOUND'};
-  const ss = SpreadsheetApp.openById(org.sheet_id);
-  const sh = ss.getSheetByName(body.sheet_name);
-  if (!sh) return {ok: false, error: 'SHEET_NOT_FOUND', sheet: body.sheet_name};
-  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
-  const rows = (body.rows || []).map(r => headers.map(h => r[h] !== undefined ? r[h] : ''));
-  if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
-  return {ok: true, imported: rows.length};
-}
-
-// =====================================================================
-// Convenience: run from editor to bootstrap master sheet
-// =====================================================================
-
-function setup() {
-  const r = initMaster_();
-  Logger.log(JSON.stringify(r));
-  return r;
+  ensure('orgs',     ['id','name','sheet_id','folder_id','manager_email','created_at','active','budget_total','notes']);
+  ensure('users',    ['username','password','role','org_id','name','added_at','permissions']);
+  ensure('audit',    ['ts','user','action','org_id','details']);
+  ensure('settings', ['key','value']);
+  return {ok: true};
 }
