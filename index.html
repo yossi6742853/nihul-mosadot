@@ -123,6 +123,13 @@
           <p class="text-muted small mb-0">הרשאות גישה</p>
         </div>
       </div>
+      <div class="col-md-6 col-lg-3 admin-only d-none">
+        <div class="card card-tile" onclick="goto('settings')">
+          <i class="bi bi-gear-fill fs-1 text-warning"></i>
+          <h5 class="mt-2">הגדרות</h5>
+          <p class="text-muted small mb-0">תקציב + קטגוריות</p>
+        </div>
+      </div>
     </div>
 
     <!-- Quick add bar -->
@@ -194,6 +201,7 @@
   <div id="page-orgs" class="d-none"></div>
   <div id="page-users" class="d-none"></div>
   <div id="page-reports" class="d-none"></div>
+  <div id="page-settings" class="d-none"></div>
 
 </div>
 
@@ -224,5 +232,6 @@
 <script src="js/search.js"></script>
 <script src="js/alerts.js"></script>
 <script src="js/reports.js"></script>
+<script src="js/settings.js"></script>
 </body>
 </html>
