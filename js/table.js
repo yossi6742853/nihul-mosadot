@@ -4,6 +4,7 @@ const HIDDEN_COLS = ['נוצר ע"י','נוצר בתאריך','נעול'];
 const EDITABLE_EXCLUDE = ['מספר סידורי','נוצר ע"י','נוצר בתאריך','נעול','מאשר','קישור חשבונית','קישור קבלה'];
 
 const _filterState = {}; // {sheetName: {q, status, category, dateFrom, dateTo, sumMin, sumMax}}
+const _selected = {};    // {sheetName: Set of _row numbers selected}
 
 async function renderTable(sheetName) {
   const root = document.getElementById('page-table');
@@ -69,8 +70,22 @@ async function renderTable(sheetName) {
       </div>
     </div>
 
+    <div id="bulkBar" class="card p-2 mb-2 d-none bulk-bar">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span><b id="bulkCount">0</b> נבחרו</span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="clearSelection('${escAttr(sheetName)}')"><i class="bi bi-x"></i> נקה</button>
+        <span class="vr"></span>
+        <button class="btn btn-sm btn-outline-success" onclick="bulkAction('${escAttr(sheetName)}','approve')"><i class="bi bi-check2-circle"></i> אישור</button>
+        <button class="btn btn-sm btn-outline-primary" onclick="bulkAction('${escAttr(sheetName)}','pay')"><i class="bi bi-cash-coin"></i> שולם</button>
+        <button class="btn btn-sm btn-outline-warning" onclick="bulkAction('${escAttr(sheetName)}','pending')"><i class="bi bi-hourglass-split"></i> ממתין לאישור</button>
+        <button class="btn btn-sm btn-outline-info" onclick="bulkExport('${escAttr(sheetName)}')"><i class="bi bi-file-earmark-excel"></i> ייצוא נבחרים</button>
+        <button class="btn btn-sm btn-outline-danger" onclick="bulkAction('${escAttr(sheetName)}','delete')"><i class="bi bi-trash"></i> מחק</button>
+      </div>
+    </div>
+
     <div class="table-wrap shadow-sm"><table class="table table-hover table-sm mb-0" id="dataTable"><thead></thead><tbody><tr><td>טוען…</td></tr></tbody></table></div>
   `;
+  _selected[sheetName] = _selected[sheetName] || new Set();
 
   const cacheKey = `${org.id}:${sheetName}`;
   if (!State.cache[cacheKey]) {
@@ -168,7 +183,10 @@ async function renderTable(sheetName) {
     rows.forEach(r => { sumFiltered += Number(r['סכום']) || 0; });
 
     const tbl = document.getElementById('dataTable');
-    let thead = '<tr>' + visibleCols.map(h => {
+    const hasBulk = isDataSheet(sheetName);
+    let thead = '<tr>';
+    if (hasBulk) thead += `<th style="width:30px"><input type="checkbox" class="form-check-input" id="selAll"></th>`;
+    thead += visibleCols.map(h => {
       const sortableCols = ['מספר סידורי','קטגורית מטרה','שם הספק','תאריך חשבון','סכום','סטטוס'];
       if (sortableCols.indexOf(h) < 0) return `<th>${escHtml(h)}</th>`;
       let cls = 'sortable';
@@ -176,14 +194,32 @@ async function renderTable(sheetName) {
       return `<th class="${cls}" onclick="toggleSort('${escAttr(sheetName)}','${escAttr(h)}')">${escHtml(h)}</th>`;
     }).join('') + '<th class="text-end">פעולות</th></tr>';
     tbl.querySelector('thead').innerHTML = thead;
+    const selAll = document.getElementById('selAll');
+    if (selAll) {
+      selAll.checked = rows.length > 0 && rows.every(r => _selected[sheetName].has(r._row));
+      selAll.onchange = (e) => {
+        if (e.target.checked) rows.forEach(r => _selected[sheetName].add(r._row));
+        else rows.forEach(r => _selected[sheetName].delete(r._row));
+        paint();
+      };
+    }
     if (!rows.length) {
       tbl.querySelector('tbody').innerHTML = `<tr><td colspan="${visibleCols.length+1}" class="text-center text-muted py-4">אין שורות תואמות.</td></tr>`;
     } else {
       tbl.querySelector('tbody').innerHTML = rows.map(r => {
         const locked = isRowLocked(r);
         const cells = visibleCols.map(h => formatCell(h, r[h], r)).join('');
-        return `<tr data-row="${r._row}" class="${locked?'locked-row':''}">${cells}<td class="row-actions text-end">${renderActions(sheetName, r, locked)}</td></tr>`;
+        const selChk = hasBulk ? `<td><input type="checkbox" class="form-check-input row-sel" data-row="${r._row}" ${_selected[sheetName].has(r._row)?'checked':''}></td>` : '';
+        const isSelected = _selected[sheetName].has(r._row);
+        return `<tr data-row="${r._row}" class="${locked?'locked-row ':''}${isSelected?'table-active':''}">${selChk}${cells}<td class="row-actions text-end">${renderActions(sheetName, r, locked)}</td></tr>`;
       }).join('');
+      tbl.querySelectorAll('input.row-sel').forEach(chk => {
+        chk.onchange = () => {
+          const r = Number(chk.dataset.row);
+          if (chk.checked) _selected[sheetName].add(r); else _selected[sheetName].delete(r);
+          updateBulkBar(sheetName);
+        };
+      });
       tbl.querySelectorAll('tr[data-row]').forEach(tr => {
         const _row = Number(tr.dataset.row);
         const rowObj = data.rows.find(x => x._row === _row);
@@ -205,11 +241,72 @@ async function renderTable(sheetName) {
       `<i class="bi bi-rows"></i> ${rows.length} מתוך ${(data.rows||[]).length}` +
       (sumFiltered ? ` · <i class="bi bi-coin"></i> ${fmtMoney(sumFiltered)}` : '');
     // Filter summary
-    const active = Object.entries(fs).filter(([k,v]) => v && v !== '' && k !== 'q').length;
+    const active = Object.entries(fs).filter(([k,v]) => v && v !== '' && k !== 'q' && k !== 'sortBy' && k !== 'sortDir').length;
     document.getElementById('filterSummary').textContent = active ? `${active} מסננים פעילים` : '';
+    updateBulkBar(sheetName);
   }
   paint();
 }
+
+function updateBulkBar(sheetName) {
+  const sel = _selected[sheetName] || new Set();
+  const bar = document.getElementById('bulkBar');
+  if (!bar) return;
+  if (sel.size === 0) bar.classList.add('d-none');
+  else {
+    bar.classList.remove('d-none');
+    document.getElementById('bulkCount').textContent = sel.size;
+  }
+}
+
+function clearSelection(sheetName) {
+  _selected[sheetName] = new Set();
+  renderTable(sheetName);
+}
+window.clearSelection = clearSelection;
+
+async function bulkAction(sheetName, action) {
+  const sel = Array.from(_selected[sheetName] || []);
+  if (!sel.length) return;
+  const labels = {approve:'לאשר',pay:'לסמן כשולם',pending:'להעביר לאישור',delete:'למחוק'};
+  if (!confirm(`${labels[action]} ${sel.length} שורות?`)) return;
+  showLoading(`מבצע על ${sel.length} שורות...`);
+  let ok = 0, fail = 0;
+  for (const _row of sel) {
+    try {
+      let r;
+      if (action === 'approve')      r = await api('setStatus', [State.user.username, State.currentOrgId, sheetName, _row, 'מאושר']);
+      else if (action === 'pay')     r = await api('setStatus', [State.user.username, State.currentOrgId, sheetName, _row, 'שולם']);
+      else if (action === 'pending') r = await api('setStatus', [State.user.username, State.currentOrgId, sheetName, _row, 'ממתין לאישור']);
+      else if (action === 'delete')  r = await api('deleteRow', [State.user.username, State.currentOrgId, sheetName, _row]);
+      if (r && r.ok) ok++; else fail++;
+    } catch { fail++; }
+  }
+  hideLoading();
+  notify(`הצליחו: ${ok}, נכשלו: ${fail}`, fail ? 'warn' : 'success');
+  _selected[sheetName] = new Set();
+  reloadTable(sheetName);
+  renderDashboard();
+}
+window.bulkAction = bulkAction;
+
+function bulkExport(sheetName) {
+  const sel = _selected[sheetName] || new Set();
+  if (!sel.size) return;
+  const data = State.cache[`${State.currentOrgId}:${sheetName}`];
+  if (!data) return;
+  const rows = (data.rows || []).filter(r => sel.has(r._row));
+  const headers = (data.headers || []).filter(h => h);
+  const aoa = [headers].concat(rows.map(r => headers.map(h => r[h] !== undefined ? r[h] : '')));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = headers.map(() => ({wch: 16}));
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  XLSX.writeFile(wb, `${currentOrg().name}_${sheetName}_${rows.length}rows_${ts}.xlsx`);
+  notify(`יוצאו ${rows.length} שורות נבחרות`, 'success');
+}
+window.bulkExport = bulkExport;
 window.renderTable = renderTable;
 
 function applyFilters(rows, fs) {
@@ -323,6 +420,23 @@ async function reloadTable(sheetName) {
   await renderTable(sheetName);
 }
 window.reloadTable = reloadTable;
+
+// ---- Quick Add (from dashboard) --------------------------------------
+async function quickAdd(sheetName) {
+  // Ensure we have cached headers
+  const org = currentOrg();
+  if (!org) return;
+  const cacheKey = `${org.id}:${sheetName}`;
+  if (!State.cache[cacheKey]) {
+    showLoading('טוען מבנה...');
+    const r = await api('getSheet', [State.user.username, org.id, sheetName]);
+    hideLoading();
+    if (!r.ok) { notify(r.error||'שגיאה','error'); return; }
+    State.cache[cacheKey] = r.data;
+  }
+  openRowEditor(sheetName, null);
+}
+window.quickAdd = quickAdd;
 
 // ---- export to Excel -------------------------------------------------
 function exportSheet(sheetName) {

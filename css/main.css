@@ -158,6 +158,17 @@ body { background: var(--bg); color: var(--text); }
 }
 .search-box input { border: 0; outline: 0; background: transparent; color: var(--text); width: 100%; font-size: 14px; }
 
+/* Quick add bar */
+.quick-add-bar { background: linear-gradient(135deg, #f0f6ff, #f3fff4); border-color: #b6e3ff; }
+[data-theme="dark"] .quick-add-bar { background: linear-gradient(135deg, #0c2d6b, #033a16); border-color: #1f6feb; }
+
+/* Bulk action bar */
+.bulk-bar { background: #fff8c5; border-color: #d4a72c; }
+[data-theme="dark"] .bulk-bar { background: #2d2100; border-color: #4d3800; }
+.bulk-bar .vr { width: 1px; background: var(--border); height: 22px; }
+.table-active > * { background-color: rgba(9,105,218,0.10) !important; }
+[data-theme="dark"] .table-active > * { background-color: rgba(88,166,255,0.10) !important; }
+
 /* Quick filter chips */
 .filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .chip {
